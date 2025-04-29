@@ -10,7 +10,7 @@ Kafka is used for message Pub/Sub. Checkout [this branch](https://github.com/min
 
 ### System architecture
 
-<img width="1028" alt="image" src="https://github.com/minghsu0107/go-random-chat/assets/50090692/81733303-b022-4069-91c0-1d0360bede7f">
+<img width="828" alt="image" src="https://github.com/user-attachments/assets/b1184f30-7167-45ab-9038-69e7c3a60c2a">
 
 
 ### Features
