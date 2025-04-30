@@ -10,13 +10,13 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type HTTPContextKey string
 
 var (
 	JWTAuthHeader                  = "Authorization"
-	JaegerHeader                   = "Uber-Trace-Id"
 	ChannelIdHeader                = "X-Channel-Id"
 	ChannelKey      HTTPContextKey = "channel_key"
 	UserKey         HTTPContextKey = "user_key"
@@ -111,10 +111,8 @@ func JWTForwardAuth() gin.HandlerFunc {
 }
 
 func getTraceID(c *gin.Context) string {
-	identifier := c.Request.Header.Get(JaegerHeader)
-	vals := strings.Split(identifier, ":")
-	if len(vals) == 4 {
-		return vals[0]
+	if span := trace.SpanContextFromContext(c.Request.Context()); span.IsSampled() {
+		return span.TraceID().String()
 	}
 	return ""
 }

@@ -103,4 +103,4 @@ observability:
   prometheus:
     port: "8080"
   tracing:
-    jaegerUrl: "http://localhost:14268/api/traces"
+    otlpEndpoint: "localhost:4318"

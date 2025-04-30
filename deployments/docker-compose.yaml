@@ -1,7 +1,7 @@
 version: '3'
 services:
   reverse-proxy:
-    image: traefik:v2.3
+    image: traefik:v3.3
     restart: always
     command:
       - "--entryPoints.web.address=:80"
@@ -10,11 +10,10 @@ services:
       - "--providers.docker.exposedbydefault=false"
       - --accesslog=true # output log to stdout
       - --tracing=true
-      - --tracing.jaeger=true
-      - --tracing.jaeger.collector.endpoint=http://jaeger:14268/api/traces?format=jaeger.thrift
-      - --tracing.jaeger.traceContextHeaderName=uber-trace-id
-      - --tracing.jaeger.gen128Bit
-      - --tracing.jaeger.samplingParam=1.0
+      - --tracing.otlp=true
+      - --tracing.otlp.grpc=true
+      - --tracing.otlp.grpc.endpoint=jaeger:4317
+      - --tracing.otlp.grpc.insecure=true
     ports:
       - 80:80
       - 8080:8080
@@ -28,7 +27,7 @@ services:
     environment:
       WEB_HTTP_SERVER_PORT: "80"
       OBSERVABILITY_PROMETHEUS_PORT: "8080"
-      OBSERVABILITY_TRACING_JAEGERURL: http://jaeger:14268/api/traces
+      OBSERVABILITY_TRACING_OTLPENDPOINT: jaeger:4318
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.rcweb.rule=PathPrefix(`/`)"
@@ -66,14 +65,14 @@ services:
       REDIS_ADDRS: redis-node-0:6379,redis-node-1:6379,redis-node-2:6379,redis-node-3:6379,redis-node-4:6379,redis-node-5:6379
       REDIS_EXPIRATIONHOUR: "24"
       OBSERVABILITY_PROMETHEUS_PORT: "8080"
-      OBSERVABILITY_TRACING_JAEGERURL: http://jaeger:14268/api/traces
+      OBSERVABILITY_TRACING_OTLPENDPOINT: jaeger:4318
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.random-chat.rule=PathPrefix(`/api/chat`)"
       - "traefik.http.routers.random-chat.entrypoints=web"
       - "traefik.http.routers.random-chat.service=random-chat"
       - "traefik.http.services.random-chat.loadbalancer.server.port=80"
-      - "traefik.http.routers.random-chat-grpc.rule=Headers(`content-type`,`application/grpc`) && Headers(`service-id`, `chat`)"
+      - "traefik.http.routers.random-chat-grpc.rule=Header(`content-type`,`application/grpc`) && Header(`service-id`, `chat`)"
       - "traefik.http.routers.random-chat-grpc.entrypoints=web"
       - "traefik.http.routers.random-chat-grpc.service=random-chat-grpc"
       - "traefik.http.services.random-chat-grpc.loadbalancer.server.port=4000"
@@ -96,9 +95,10 @@ services:
       REDIS_ADDRS: redis-node-0:6379,redis-node-1:6379,redis-node-2:6379,redis-node-3:6379,redis-node-4:6379,redis-node-5:6379
       REDIS_EXPIRATIONHOUR: "24"
       OBSERVABILITY_PROMETHEUS_PORT: "8080"
+      OBSERVABILITY_TRACING_OTLPENDPOINT: jaeger:4318
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.forwarder-grpc.rule=Headers(`content-type`,`application/grpc`) && Headers(`service-id`, `forwarder`)"
+      - "traefik.http.routers.forwarder-grpc.rule=Header(`content-type`,`application/grpc`) && Header(`service-id`, `forwarder`)"
       - "traefik.http.routers.forwarder-grpc.entrypoints=web"
       - "traefik.http.routers.forwarder-grpc.service=forwarder-grpc"
       - "traefik.http.services.forwarder-grpc.loadbalancer.server.port=4000"
@@ -125,7 +125,7 @@ services:
       REDIS_ADDRS: redis-node-0:6379,redis-node-1:6379,redis-node-2:6379,redis-node-3:6379,redis-node-4:6379,redis-node-5:6379
       REDIS_EXPIRATIONHOUR: "24"
       OBSERVABILITY_PROMETHEUS_PORT: "8080"
-      OBSERVABILITY_TRACING_JAEGERURL: http://jaeger:14268/api/traces
+      OBSERVABILITY_TRACING_OTLPENDPOINT: jaeger:4318
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.match.rule=PathPrefix(`/api/match`)"
@@ -154,7 +154,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_ADDRS: redis-node-0:6379,redis-node-1:6379,redis-node-2:6379,redis-node-3:6379,redis-node-4:6379,redis-node-5:6379
       OBSERVABILITY_PROMETHEUS_PORT: "8080"
-      OBSERVABILITY_TRACING_JAEGERURL: http://jaeger:14268/api/traces
+      OBSERVABILITY_TRACING_OTLPENDPOINT: jaeger:4318
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.uploader.rule=PathPrefix(`/api/uploader`)"
@@ -186,14 +186,14 @@ services:
       REDIS_ADDRS: redis-node-0:6379,redis-node-1:6379,redis-node-2:6379,redis-node-3:6379,redis-node-4:6379,redis-node-5:6379
       REDIS_EXPIRATIONHOUR: "24"
       OBSERVABILITY_PROMETHEUS_PORT: "8080"
-      OBSERVABILITY_TRACING_JAEGERURL: http://jaeger:14268/api/traces
+      OBSERVABILITY_TRACING_OTLPENDPOINT: jaeger:4318
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.user.rule=PathPrefix(`/api/user`)"
       - "traefik.http.routers.user.entrypoints=web"
       - "traefik.http.routers.user.service=user"
       - "traefik.http.services.user.loadbalancer.server.port=80"
-      - "traefik.http.routers.user-grpc.rule=Headers(`content-type`,`application/grpc`) && Headers(`service-id`, `user`)"
+      - "traefik.http.routers.user-grpc.rule=Header(`content-type`,`application/grpc`) && Header(`service-id`, `user`)"
       - "traefik.http.routers.user-grpc.entrypoints=web"
       - "traefik.http.routers.user-grpc.service=user-grpc"
       - "traefik.http.services.user-grpc.loadbalancer.server.port=4000"
@@ -241,11 +241,11 @@ services:
     ports:
       - 9090:9090
   jaeger:
-    image: jaegertracing/all-in-one:1.22
-    restart: always
+    image: jaegertracing/all-in-one:latest
     ports:
-      - 14268:14268
-      - 16686:16686
+      - "16686:16686"  # UI
+      - "24317:4317"   # OTLP gRPC
+      - "24318:4318"   # OTLP HTTP
   redis-node-0:
     image: docker.io/bitnami/redis-cluster:7.0
     restart: always
@@ -312,7 +312,7 @@ services:
     image: confluentinc/cp-zookeeper:7.6.0
     restart: unless-stopped
     environment:
-      ZOOKEEPER_CLIENT_PORT: 2181   
+      ZOOKEEPER_CLIENT_PORT: 2181
   kafka:
     image: confluentinc/cp-kafka:7.6.0
     restart: unless-stopped

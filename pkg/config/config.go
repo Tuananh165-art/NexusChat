@@ -177,7 +177,7 @@ type ObservabilityConfig struct {
 		Port string
 	}
 	Tracing struct {
-		JaegerUrl string
+		OtlpEndpoint string
 	}
 }
 
@@ -250,7 +250,7 @@ func setDefault() {
 	viper.SetDefault("redis.writeTimeoutMilliSecond", 3000)
 
 	viper.SetDefault("observability.prometheus.port", "8080")
-	viper.SetDefault("observability.tracing.jaegerUrl", "")
+	viper.SetDefault("observability.tracing.otlpEndpoint", "")
 }
 
 func NewConfig() (*Config, error) {
