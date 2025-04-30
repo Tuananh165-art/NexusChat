@@ -111,14 +111,13 @@ func InitializeGrpcServer(name string, logger common.GrpcLog) *grpc.Server {
 	}
 
 	opts = append(opts,
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.ChainStreamInterceptor(
-			otelgrpc.StreamServerInterceptor(),
 			srvMetrics.StreamServerInterceptor(grpcprom.WithExemplarFromContext(exemplarFromContext)),
 			logging.StreamServerInterceptor(interceptorLogger(logger), logOpts...),
 			recovery.StreamServerInterceptor(recovery.WithRecoveryHandler(grpcPanicRecoveryHandler)),
 		),
 		grpc.ChainUnaryInterceptor(
-			otelgrpc.UnaryServerInterceptor(),
 			srvMetrics.UnaryServerInterceptor(grpcprom.WithExemplarFromContext(exemplarFromContext)),
 			logging.UnaryServerInterceptor(interceptorLogger(logger), logging.WithFieldsFromContext(logTraceID)),
 			recovery.UnaryServerInterceptor(recovery.WithRecoveryHandler(grpcPanicRecoveryHandler)),
@@ -130,9 +129,6 @@ func InitializeGrpcServer(name string, logger common.GrpcLog) *grpc.Server {
 }
 
 func InitializeGrpcClient(svcHost string) (*grpc.ClientConn, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
 	scheme := "dns"
 
 	retryOpts := []retry.CallOption{
@@ -143,11 +139,13 @@ func InitializeGrpcClient(svcHost string) (*grpc.ClientConn, error) {
 		retry.WithPerRetryTimeout(3 * time.Second),
 	}
 
-	dialOpts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	}
+	handler := otelgrpc.NewClientHandler()
 
-	dialOpts = append(dialOpts,
+	slog.Info("connecting to grpc host: " + svcHost)
+	client, err := grpc.NewClient(
+		fmt.Sprintf("%s:///%s", scheme, svcHost),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithStatsHandler(handler),
 		grpc.WithDisableServiceConfig(),
 		grpc.WithDefaultServiceConfig(`{
 			"loadBalancingPolicy": "round_robin"
@@ -157,27 +155,18 @@ func InitializeGrpcClient(svcHost string) (*grpc.ClientConn, error) {
 			Timeout:             time.Second,      // wait 1 second for ping ack before considering the connection dead
 			PermitWithoutStream: true,             // send pings even without active streams
 		}),
-		grpc.WithChainStreamInterceptor(
-			otelgrpc.StreamClientInterceptor(),
-			retry.StreamClientInterceptor(retryOpts...),
-		),
 		grpc.WithChainUnaryInterceptor(
-			otelgrpc.UnaryClientInterceptor(),
 			retry.UnaryClientInterceptor(retryOpts...),
 		),
+		grpc.WithChainStreamInterceptor(
+			retry.StreamClientInterceptor(retryOpts...),
+		),
 		//grpc.WithBlock(),
-	)
-
-	slog.Info("connecting to grpc host: " + svcHost)
-	conn, err := grpc.DialContext(
-		ctx,
-		fmt.Sprintf("%s:///%s", scheme, svcHost),
-		dialOpts...,
 	)
 	if err != nil {
 		return nil, err
 	}
-	return conn, nil
+	return client, nil
 }
 
 func NewGrpcEndpoint(conn *grpc.ClientConn, serviceID, serviceName, method string, grpcReply interface{}) endpoint.Endpoint {

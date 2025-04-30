@@ -45,7 +45,7 @@ func Auth(authPayload *AuthPayload) (*AuthResponse, error) {
 	}
 
 	claims, ok := token.Claims.(*JWTClaims)
-	if !(ok && token.Valid) {
+	if !ok || !token.Valid {
 		return nil, ErrInvalidToken
 	}
 

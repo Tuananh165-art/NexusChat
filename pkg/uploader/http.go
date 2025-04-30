@@ -76,22 +76,14 @@ func NewHttpServer(name string, logger common.HttpLog, config *config.Config, sv
 	s3Endpoint := config.Uploader.S3.Endpoint
 	s3Bucket := config.Uploader.S3.Bucket
 	creds := credentials.NewStaticCredentialsProvider(config.Uploader.S3.AccessKey, config.Uploader.S3.SecretKey, "")
-	customResolver := aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-		return aws.Endpoint{
-			PartitionID:       "aws",
-			URL:               s3Endpoint,
-			SigningRegion:     config.Uploader.S3.Region,
-			HostnameImmutable: true,
-		}, nil
-	})
 	awsConfig := aws.Config{
-		Credentials:                 creds,
-		EndpointResolverWithOptions: customResolver,
-		Region:                      config.Uploader.S3.Region,
-		RetryMaxAttempts:            3,
+		Credentials:      creds,
+		Region:           config.Uploader.S3.Region,
+		RetryMaxAttempts: 3,
 	}
 	s3Client := s3.NewFromConfig(awsConfig, func(o *s3.Options) {
-	    o.UsePathStyle = true
+		o.UsePathStyle = true
+		o.EndpointResolver = s3.EndpointResolverFromURL(s3Endpoint)
 	})
 
 	return &HttpServer{
