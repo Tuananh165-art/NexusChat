@@ -78,7 +78,6 @@ services:
       - "traefik.http.services.random-chat-grpc.loadbalancer.server.port=4000"
       - "traefik.http.services.random-chat-grpc.loadbalancer.server.scheme=h2c"
     depends_on:
-      - zookeeper
       - kafka
   forwarder:
     image: minghsu0107/random-chat-api:kafka
@@ -104,7 +103,6 @@ services:
       - "traefik.http.services.forwarder-grpc.loadbalancer.server.port=4000"
       - "traefik.http.services.forwarder-grpc.loadbalancer.server.scheme=h2c"
     depends_on:
-      - zookeeper
       - kafka
   match:
     image: minghsu0107/random-chat-api:kafka
@@ -202,7 +200,7 @@ services:
     image: minio/minio:RELEASE.2023-07-11T21-29-34Z
     volumes:
       - minio_data:/export
-    command: 
+    command:
       - server
       - /export
       - --console-address
@@ -223,19 +221,13 @@ services:
     depends_on:
       - minio
     entrypoint: >
-      /bin/sh -c "
-      set -e;
-      /usr/bin/mc config host add myminio http://minio:9000 testaccesskey testsecret;
-      /usr/bin/mc mb myminio/myfilebucket;
-      /usr/bin/mc anonymous set private myminio/myfilebucket;
-      exit 0;
-      "
+      /bin/sh -c " set -e; /usr/bin/mc config host add myminio http://minio:9000 testaccesskey testsecret; /usr/bin/mc mb myminio/myfilebucket; /usr/bin/mc anonymous set private myminio/myfilebucket; exit 0; "
   prometheus:
     image: prom/prometheus:v2.45.0
     restart: always
     volumes:
       - ./prometheus/prometheus.yaml:/etc/prometheus/prometheus.yaml
-    command: 
+    command:
       - --config.file=/etc/prometheus/prometheus.yaml
       - --enable-feature=exemplar-storage
     ports:
@@ -243,9 +235,9 @@ services:
   jaeger:
     image: jaegertracing/all-in-one:latest
     ports:
-      - "16686:16686"  # UI
-      - "24317:4317"   # OTLP gRPC
-      - "24318:4318"   # OTLP HTTP
+      - "16686:16686" # UI
+      - "24317:4317" # OTLP gRPC
+      - "24318:4318" # OTLP HTTP
   redis-node-0:
     image: docker.io/bitnami/redis-cluster:7.0
     restart: always
@@ -308,19 +300,22 @@ services:
       - 'REDIS_CLUSTER_REPLICAS=1'
       - 'REDIS_NODES=redis-node-0 redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5'
       - 'REDIS_CLUSTER_CREATOR=yes'
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.6.0
-    restart: unless-stopped
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
   kafka:
     image: confluentinc/cp-kafka:7.6.0
     restart: unless-stopped
+    volumes:
+      - kafka_data:/var/lib/kafka/data
     environment:
-      KAFKA_LOG_RETENTION_MINUTES: 1440 # save data for 24hrs
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_PROCESS_ROLES: controller,broker
+      KAFKA_NODE_ID: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@localhost:9093"
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      # KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      CLUSTER_ID: "ciWo7IWazngRchmPES6q5A==" # UUID for the Kafka cluster
+      KAFKA_LOG_RETENTION_MINUTES: 1440 # save data for 24hrs
       # This is required when you are running with a single-node cluster
       # specify the replication factor for the __consumer_offsets topic
       # __consumer_offsets topic preserves consumer offsets when consumer group commits offsets to Kafka
@@ -329,8 +324,7 @@ services:
       # Kafka will automatically create the topic with the default replication factor and number of partitions
       # which is true by default
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-    depends_on:
-      - zookeeper
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0 # No delay for consumer rebalancing
   cassandra:
     image: docker.io/bitnami/cassandra:4.0
     restart: always
@@ -344,10 +338,11 @@ services:
       - CASSANDRA_PASSWORD_SEEDER=yes
       - CASSANDRA_USER=ming
       - CASSANDRA_PASSWORD=cassandrapass
-  
+
 volumes:
   minio_data:
   cassandra_data:
+  kafka_data:
   redis-cluster_data-0:
   redis-cluster_data-1:
   redis-cluster_data-2:
