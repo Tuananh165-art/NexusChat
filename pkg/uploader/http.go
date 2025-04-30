@@ -83,7 +83,7 @@ func NewHttpServer(name string, logger common.HttpLog, config *config.Config, sv
 	}
 	s3Client := s3.NewFromConfig(awsConfig, func(o *s3.Options) {
 		o.UsePathStyle = true
-		o.EndpointResolver = s3.EndpointResolverFromURL(s3Endpoint)
+		o.BaseEndpoint = aws.String(s3Endpoint)
 	})
 
 	return &HttpServer{
