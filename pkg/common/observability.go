@@ -1,6 +1,7 @@
 package common
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -10,9 +11,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	propjaeger "go.opentelemetry.io/contrib/propagators/jaeger"
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/exporters/jaeger"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	tracesdk "go.opentelemetry.io/otel/sdk/trace"
@@ -22,25 +23,25 @@ import (
 var TracerProvider *tracesdk.TracerProvider
 
 type ObservabilityInjector struct {
-	promPort  string
-	jaegerUrl string
+	promPort     string
+	otlpEndpoint string
 }
 
 func NewObservabilityInjector(config *config.Config) *ObservabilityInjector {
 	return &ObservabilityInjector{
-		promPort:  config.Observability.Prometheus.Port,
-		jaegerUrl: config.Observability.Tracing.JaegerUrl,
+		promPort:     config.Observability.Prometheus.Port,
+		otlpEndpoint: config.Observability.Tracing.OtlpEndpoint,
 	}
 }
 
 func (injector *ObservabilityInjector) Register(service string) error {
-	if injector.jaegerUrl != "" {
-		err := initTracerProvider(injector.jaegerUrl, service)
+	if injector.otlpEndpoint != "" {
+		err := initTracerProvider(injector.otlpEndpoint, service)
 		if err != nil {
 			return err
 		}
 		otel.SetTracerProvider(TracerProvider)
-		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propjaeger.Jaeger{}, propagation.Baggage{}))
+		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
 	}
 	if injector.promPort != "" {
 		go func() {
@@ -85,15 +86,23 @@ func NewOtelHttpHandler(h http.Handler, operation string) http.Handler {
 	return otelhttp.NewHandler(h, operation, httpOptions...)
 }
 
-func initTracerProvider(jaegerUrl, service string) error {
-	exp, err := jaeger.New(jaeger.WithCollectorEndpoint(jaeger.WithEndpoint(jaegerUrl)))
-	if err != nil {
-		return err
+func initTracerProvider(otlpEndpoint, service string) error {
+	ctx := context.Background()
+
+	// Create OTLP exporter
+	opts := []otlptracehttp.Option{
+		otlptracehttp.WithEndpoint(otlpEndpoint),
+		otlptracehttp.WithInsecure(),
 	}
+	client := otlptracehttp.NewClient(opts...)
+	exporter, err := otlptrace.New(ctx, client)
+	if err != nil {
+		return fmt.Errorf("creating OTLP trace exporter: %w", err)
+	}
+
 	TracerProvider = tracesdk.NewTracerProvider(
 		tracesdk.WithSampler(tracesdk.ParentBased(tracesdk.TraceIDRatioBased(0.0001))),
-		// Always be sure to batch in production.
-		tracesdk.WithBatcher(exp),
+		tracesdk.WithBatcher(exporter),
 		// Record information about this application in a Resource.
 		tracesdk.WithResource(resource.NewWithAttributes(
 			semconv.SchemaURL,
