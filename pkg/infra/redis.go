@@ -8,8 +8,8 @@ import (
 
 	"github.com/minghsu0107/go-random-chat/pkg/common"
 	"github.com/minghsu0107/go-random-chat/pkg/config"
-	"github.com/redis/go-redis/extra/redisotel/v9"
-	"github.com/redis/go-redis/v9"
+	redisotel "github.com/redis/go-redis/extra/redisotel/v9"
+	redis "github.com/redis/go-redis/v9"
 )
 
 var (
