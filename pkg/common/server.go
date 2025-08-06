@@ -77,8 +77,6 @@ func (s *Server) GracefulStop(ctx context.Context, done chan bool) {
 
 	if err = s.infraCloser.Close(); err != nil {
 		slog.Error(err.Error())
-	} else {
-		slog.Info("gracefully shutdowned")
 	}
 	done <- true
 }
