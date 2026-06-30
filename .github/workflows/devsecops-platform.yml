@@ -1,6 +1,7 @@
 name: DevSecOps Platform Pipeline
 
 on:
+  workflow_dispatch:
   pull_request:
     branches:
       - "**"
@@ -95,11 +96,16 @@ jobs:
       - name: Helm template
         run: helm template nexuschat deployments/helm/nexuschat --namespace nexuschat-staging > rendered-nexuschat.yaml
 
+      - name: Helm template lab 4GB profile
+        run: helm template nexuschat deployments/helm/nexuschat --namespace nexuschat-lab --values deployments/helm/nexuschat/values.yaml --values deployments/helm/nexuschat/values-lab-4gb.yaml > rendered-nexuschat-lab.yaml
+
       - name: Upload rendered manifests
         uses: actions/upload-artifact@v4
         with:
           name: rendered-nexuschat
-          path: rendered-nexuschat.yaml
+          path: |
+            rendered-nexuschat.yaml
+            rendered-nexuschat-lab.yaml
 
   secret-scan:
     name: Secret Scan
