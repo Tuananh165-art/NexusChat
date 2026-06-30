@@ -44,3 +44,18 @@ func (presigner *Presigner) PutObject(ctx context.Context, bucketName string, ob
 	}
 	return request, nil
 }
+
+func (presigner *Presigner) UploadPart(ctx context.Context, bucketName, objectKey, uploadID string, partNumber int32) (*v4.PresignedHTTPRequest, error) {
+	request, err := presigner.presignClient.PresignUploadPart(ctx, &s3.UploadPartInput{
+		Bucket:     aws.String(bucketName),
+		Key:        aws.String(objectKey),
+		UploadId:   aws.String(uploadID),
+		PartNumber: aws.Int32(partNumber),
+	}, func(opts *s3.PresignOptions) {
+		opts.Expires = time.Duration(presigner.lifetimeSecond * int64(time.Second))
+	})
+	if err != nil {
+		return nil, fmt.Errorf("couldn't presign upload part for %v:%v, reason: %v", bucketName, objectKey, err)
+	}
+	return request, nil
+}

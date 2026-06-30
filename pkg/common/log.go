@@ -7,7 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/gin-gonic/gin"
-	"github.com/minghsu0107/go-random-chat/pkg/config"
+	"github.com/Tuananh165-art/NexusChat/pkg/config"
 )
 
 type HttpLog struct {

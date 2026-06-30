@@ -3,7 +3,7 @@ package web
 import (
 	"context"
 
-	"github.com/minghsu0107/go-random-chat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
 )
 
 type Router struct {

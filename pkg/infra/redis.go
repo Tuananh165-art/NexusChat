@@ -6,8 +6,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/minghsu0107/go-random-chat/pkg/common"
-	"github.com/minghsu0107/go-random-chat/pkg/config"
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/config"
 	redisotel "github.com/redis/go-redis/extra/redisotel/v9"
 	redis "github.com/redis/go-redis/v9"
 )

@@ -4,16 +4,41 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/minghsu0107/go-random-chat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
 )
 
 type MessagePresenter struct {
+	MessageID     string                 `json:"message_id"`
+	Event         int                    `json:"event"`
+	UserID        string                 `json:"user_id"`
+	Payload       string                 `json:"payload"`
+	Seen          bool                   `json:"seen"`
+	Time          int64                  `json:"time"`
+	EditedAt      int64                  `json:"edited_at,omitempty"`
+	DeletedForAll bool                   `json:"deleted_for_all,omitempty"`
+	DeletedBy     string                 `json:"deleted_by,omitempty"`
+	Reactions     []ReactionSummaryPresenter `json:"reactions,omitempty"`
+	IsPinned      bool                   `json:"is_pinned,omitempty"`
+	ParentID      string                 `json:"parent_id,omitempty"`
+	ReplyPreview  *ReplyPreviewPresenter `json:"reply_preview,omitempty"`
+}
+
+type ReplyPreviewPresenter struct {
 	MessageID string `json:"message_id"`
-	Event     int    `json:"event"`
 	UserID    string `json:"user_id"`
 	Payload   string `json:"payload"`
-	Seen      bool   `json:"seen"`
-	Time      int64  `json:"time"`
+}
+
+type ReactionSummaryPresenter struct {
+	Emoji   string   `json:"emoji"`
+	Count   int      `json:"count"`
+	UserIDs []string `json:"user_ids"`
+}
+
+type PinnedMessagePresenter struct {
+	MessageID string `json:"message_id"`
+	PinnedBy  string `json:"pinned_by"`
+	PinnedAt  int64  `json:"pinned_at"`
 }
 
 type UserPresenter struct {

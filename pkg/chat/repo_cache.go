@@ -4,13 +4,14 @@ import (
 	"context"
 	"strconv"
 
-	"github.com/minghsu0107/go-random-chat/pkg/common"
-	"github.com/minghsu0107/go-random-chat/pkg/infra"
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/infra"
 )
 
 var (
-	channelUsersPrefix = "rc:chanusers"
-	onlineUsersPrefix  = "rc:onlineusers"
+	channelUsersPrefix    = "rc:chanusers"
+	onlineUsersPrefix     = "rc:onlineusers"
+	notifPrefsPrefix      = "rc:notifprefs"
 )
 
 type UserRepoCache interface {
@@ -21,6 +22,8 @@ type UserRepoCache interface {
 	AddOnlineUser(ctx context.Context, channelID uint64, userID uint64) error
 	DeleteOnlineUser(ctx context.Context, channelID, userID uint64) error
 	GetOnlineUserIDs(ctx context.Context, channelID uint64) ([]uint64, error)
+	SetNotificationPref(ctx context.Context, channelID, userID uint64, pref string) error
+	GetNotificationPref(ctx context.Context, channelID, userID uint64) (string, error)
 }
 
 type MessageRepoCache interface {
@@ -28,11 +31,24 @@ type MessageRepoCache interface {
 	MarkMessageSeen(ctx context.Context, channelID, messageID uint64) error
 	PublishMessage(ctx context.Context, msg *Message) error
 	ListMessages(ctx context.Context, channelID uint64, pageStateStr string) ([]*Message, string, error)
+	EditMessage(ctx context.Context, channelID, messageID uint64, newPayload string, editedAt int64) error
+	DeleteMessageForAll(ctx context.Context, channelID, messageID, deletedBy uint64) error
+	GetMessage(ctx context.Context, channelID, messageID uint64) (*Message, error)
+	AddReaction(ctx context.Context, channelID, messageID, userID uint64, emoji string) error
+	RemoveReaction(ctx context.Context, channelID, messageID, userID uint64, emoji string) error
+	GetReactions(ctx context.Context, channelID, messageID uint64) ([]ReactionSummary, error)
+	PinMessage(ctx context.Context, channelID, messageID, pinnedBy uint64) error
+	UnpinMessage(ctx context.Context, channelID, messageID uint64) error
+	GetPinnedMessages(ctx context.Context, channelID uint64) ([]PinnedMessage, error)
+	SearchMessages(ctx context.Context, channelID uint64, query string, limit int) ([]*Message, error)
+	ListMediaMessages(ctx context.Context, channelID uint64, mediaType string, limit int) ([]*Message, error)
 }
 
 type ChannelRepoCache interface {
 	CreateChannel(ctx context.Context, channelID uint64) (*Channel, error)
 	DeleteChannel(ctx context.Context, channelID uint64) error
+	AssignRole(ctx context.Context, channelID, userID uint64, role Role) error
+	GetRole(ctx context.Context, channelID, userID uint64) (Role, error)
 }
 
 type UserRepoCacheImpl struct {
@@ -141,6 +157,22 @@ func (cache *UserRepoCacheImpl) GetOnlineUserIDs(ctx context.Context, channelID 
 	}
 	return userIDs, nil
 }
+func (cache *UserRepoCacheImpl) SetNotificationPref(ctx context.Context, channelID, userID uint64, pref string) error {
+	key := constructKey(notifPrefsPrefix, channelID) + ":" + strconv.FormatUint(userID, 10)
+	return cache.r.Set(ctx, key, pref)
+}
+func (cache *UserRepoCacheImpl) GetNotificationPref(ctx context.Context, channelID, userID uint64) (string, error) {
+	key := constructKey(notifPrefsPrefix, channelID) + ":" + strconv.FormatUint(userID, 10)
+	var pref string
+	found, err := cache.r.Get(ctx, key, &pref)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "all", nil
+	}
+	return pref, nil
+}
 
 type MessageRepoCacheImpl struct {
 	messageRepo MessageRepo
@@ -161,6 +193,39 @@ func (cache *MessageRepoCacheImpl) PublishMessage(ctx context.Context, msg *Mess
 }
 func (cache *MessageRepoCacheImpl) ListMessages(ctx context.Context, channelID uint64, pageStateStr string) ([]*Message, string, error) {
 	return cache.messageRepo.ListMessages(ctx, channelID, pageStateStr)
+}
+func (cache *MessageRepoCacheImpl) EditMessage(ctx context.Context, channelID, messageID uint64, newPayload string, editedAt int64) error {
+	return cache.messageRepo.EditMessage(ctx, channelID, messageID, newPayload, editedAt)
+}
+func (cache *MessageRepoCacheImpl) DeleteMessageForAll(ctx context.Context, channelID, messageID, deletedBy uint64) error {
+	return cache.messageRepo.DeleteMessageForAll(ctx, channelID, messageID, deletedBy)
+}
+func (cache *MessageRepoCacheImpl) GetMessage(ctx context.Context, channelID, messageID uint64) (*Message, error) {
+	return cache.messageRepo.GetMessage(ctx, channelID, messageID)
+}
+func (cache *MessageRepoCacheImpl) AddReaction(ctx context.Context, channelID, messageID, userID uint64, emoji string) error {
+	return cache.messageRepo.AddReaction(ctx, channelID, messageID, userID, emoji)
+}
+func (cache *MessageRepoCacheImpl) RemoveReaction(ctx context.Context, channelID, messageID, userID uint64, emoji string) error {
+	return cache.messageRepo.RemoveReaction(ctx, channelID, messageID, userID, emoji)
+}
+func (cache *MessageRepoCacheImpl) GetReactions(ctx context.Context, channelID, messageID uint64) ([]ReactionSummary, error) {
+	return cache.messageRepo.GetReactions(ctx, channelID, messageID)
+}
+func (cache *MessageRepoCacheImpl) PinMessage(ctx context.Context, channelID, messageID, pinnedBy uint64) error {
+	return cache.messageRepo.PinMessage(ctx, channelID, messageID, pinnedBy)
+}
+func (cache *MessageRepoCacheImpl) UnpinMessage(ctx context.Context, channelID, messageID uint64) error {
+	return cache.messageRepo.UnpinMessage(ctx, channelID, messageID)
+}
+func (cache *MessageRepoCacheImpl) GetPinnedMessages(ctx context.Context, channelID uint64) ([]PinnedMessage, error) {
+	return cache.messageRepo.GetPinnedMessages(ctx, channelID)
+}
+func (cache *MessageRepoCacheImpl) SearchMessages(ctx context.Context, channelID uint64, query string, limit int) ([]*Message, error) {
+	return cache.messageRepo.SearchMessages(ctx, channelID, query, limit)
+}
+func (cache *MessageRepoCacheImpl) ListMediaMessages(ctx context.Context, channelID uint64, mediaType string, limit int) ([]*Message, error) {
+	return cache.messageRepo.ListMediaMessages(ctx, channelID, mediaType, limit)
 }
 
 type ChannelRepoCacheImpl struct {
@@ -194,6 +259,12 @@ func (cache *ChannelRepoCacheImpl) DeleteChannel(ctx context.Context, channelID 
 		},
 	}
 	return cache.r.ExecPipeLine(ctx, &cmds)
+}
+func (cache *ChannelRepoCacheImpl) AssignRole(ctx context.Context, channelID, userID uint64, role Role) error {
+	return cache.channelRepo.AssignRole(ctx, channelID, userID, role)
+}
+func (cache *ChannelRepoCacheImpl) GetRole(ctx context.Context, channelID, userID uint64) (Role, error) {
+	return cache.channelRepo.GetRole(ctx, channelID, userID)
 }
 
 func constructKey(prefix string, id uint64) string {

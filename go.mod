@@ -1,4 +1,4 @@
-module github.com/minghsu0107/go-random-chat
+module github.com/Tuananh165-art/NexusChat
 
 go 1.24
 

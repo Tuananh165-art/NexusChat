@@ -1,8 +1,8 @@
 package match
 
 import (
-	"github.com/minghsu0107/go-random-chat/pkg/config"
-	"github.com/minghsu0107/go-random-chat/pkg/transport"
+	"github.com/Tuananh165-art/NexusChat/pkg/config"
+	"github.com/Tuananh165-art/NexusChat/pkg/transport"
 	"google.golang.org/grpc"
 )
 

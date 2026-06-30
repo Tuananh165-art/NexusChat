@@ -25,3 +25,12 @@ type PresignedUpload struct {
 type PresignedDownload struct {
 	Url string `json:"url"`
 }
+
+type ChunkUploadInitResponse struct {
+	UploadID  string `json:"upload_id"`
+	ObjectKey string `json:"object_key"`
+}
+
+type ChunkPresignedResponse struct {
+	Url string `json:"url"`
+}

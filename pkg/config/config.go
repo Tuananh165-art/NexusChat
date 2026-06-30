@@ -9,6 +9,7 @@ import (
 type Config struct {
 	Web           *WebConfig           `mapstructure:"web"`
 	Chat          *ChatConfig          `mapstructure:"chat"`
+	AI            *AIConfig            `mapstructure:"ai"`
 	Forwarder     *ForwarderConfig     `mapstructure:"forwarder"`
 	Match         *MatchConfig         `mapstructure:"match"`
 	Uploader      *UploaderConfig      `mapstructure:"uploader"`
@@ -17,6 +18,11 @@ type Config struct {
 	Cassandra     *CassandraConfig     `mapstructure:"cassandra"`
 	Redis         *RedisConfig         `mapstructure:"redis"`
 	Observability *ObservabilityConfig `mapstructure:"observability"`
+}
+
+type AIConfig struct {
+	BaseURL             string
+	RequestTimeoutMilli int64
 }
 
 type WebConfig struct {
@@ -106,6 +112,7 @@ type UploaderConfig struct {
 	}
 	S3 struct {
 		Endpoint              string
+		PublicEndpoint        string
 		Region                string
 		Bucket                string
 		AccessKey             string
@@ -197,6 +204,9 @@ func setDefault() {
 	viper.SetDefault("chat.jwt.secret", "replaceme")
 	viper.SetDefault("chat.jwt.expirationSecond", 86400)
 
+	viper.SetDefault("ai.baseURL", "http://localhost:8090")
+	viper.SetDefault("ai.requestTimeoutMilli", 30000)
+
 	viper.SetDefault("match.http.server.port", "5002")
 	viper.SetDefault("match.http.server.maxConn", 200)
 	viper.SetDefault("match.http.server.swag", false)
@@ -208,6 +218,7 @@ func setDefault() {
 	viper.SetDefault("uploader.http.server.maxBodyByte", "67108864")   // 64MB
 	viper.SetDefault("uploader.http.server.maxMemoryByte", "16777216") // 16MB
 	viper.SetDefault("uploader.s3.endpoint", "http://localhost:9000")
+	viper.SetDefault("uploader.s3.publicEndpoint", "http://localhost:9000")
 	viper.SetDefault("uploader.s3.region", "us-east-1")
 	viper.SetDefault("uploader.s3.bucket", "myfilebucket")
 	viper.SetDefault("uploader.s3.accessKey", "")
@@ -237,9 +248,9 @@ func setDefault() {
 
 	viper.SetDefault("cassandra.hosts", "localhost")
 	viper.SetDefault("cassandra.port", 9042)
-	viper.SetDefault("cassandra.user", "cassandra")
-	viper.SetDefault("cassandra.password", "cassandra")
-	viper.SetDefault("cassandra.keyspace", "randomchat")
+	viper.SetDefault("cassandra.user", "admin")
+	viper.SetDefault("cassandra.password", "nexuschat165")
+	viper.SetDefault("cassandra.keyspace", "NexusChat")
 
 	viper.SetDefault("redis.password", "")
 	viper.SetDefault("redis.addrs", "localhost:6379")

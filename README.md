@@ -1,105 +1,333 @@
-# Go Random Chat
-![GitHub tag (latest SemVer)](https://img.shields.io/github/v/tag/minghsu0107/go-random-chat?label=Version&sort=semver)
-![CI status api](https://github.com/minghsu0107/go-random-chat/actions/workflows/docker-api-dev.yml/badge.svg)
+# NexusChat
+![GitHub tag (latest SemVer)](https://img.shields.io/github/v/tag/Tuananh165-art/NexusChat?label=Version&sort=semver)
+![CI status api](https://github.com/Tuananh165-art/NexusChat/actions/workflows/docker-api-dev.yml/badge.svg)
 
-Modern real-time chat platform in scalable architecture, written in go.
+NexusChat is a production-oriented real-time chat platform built as a microservices system. The core backend is written in Go, the web client is built with Next.js, and the AI layer is implemented as an independent Python service.
 
-## Overview
+## Problem
 
-### System architecture
+Traditional chat systems often fail when they need to balance these requirements at the same time:
 
-<img width="828" alt="image" src="https://github.com/user-attachments/assets/b1184f30-7167-45ab-9038-69e7c3a60c2a">
+- low-latency websocket messaging
+- scalable service boundaries
+- reliable file upload and access control
+- search, pin, reaction, typing, and delivery state
+- room-level authorization
+- AI features that should not pollute the core chat domain
 
+When AI logic is placed inside the chat service, the service becomes harder to reason about, harder to test, and harder to scale independently.
 
-### Features
-- Real-time communication and efficient websocket handling using [Melody](https://github.com/olahol/melody).
-- Microservices architecture. All services **are stateless** and can be horizontally scaled on demand.
-  - `web`: frontend server
-  - `user`: user account server
-  - `match`: user matching server
-  - `chat`: messaging server
-  - `forwarder`: message forwarding server that maps message receivers to specific `chat` servers
-  - `uploader`: file uploader
-- Use gRPC for inter-service communication
-  - with retry, timeout, and circuit breaker
-- Use [cobra](https://github.com/spf13/cobra) and [viper](https://github.com/spf13/viper) for CLI and configuration management respectively.
-- Dependency injection using [wire](https://github.com/google/wire).
-- Graceful shutdown.
-- Observability using [Golang Prometheus client](https://github.com/prometheus/client_golang) for monitoring and [opentelemetry-go](https://github.com/open-telemetry/opentelemetry-go) for tracing.
-- At-least-once delivery for message Pub/Sub using [Kafka](https://kafka.apache.org).
-- Persist messages and chat channel metadata in [Cassandra](https://cassandra.apache.org), an open source NoSQL distributed database for scalability and high availability.
-- Automatically generate RESTful API documentation with Swagger 2.0.
-- User login session management using http-only cookie.
-- Support Google OAuth2 login.
-- User matching with idempotency.
-- Chat channel authentication using JWT.
-- S3-compatible object storage for uploaded files.
-- Channel-level file access control using S3 presigned URLs.
-- Support uploading images from clipboard.
-- Use [Traefik FowardAuth](https://doc.traefik.io/traefik/middlewares/http/forwardauth/) for file upload authentication.
-- Protect file upload api with distributed rate limiting (token bucket algorithm).
-- Message seen feature.
-- Auto-scroll to the first unseen message.
-- Persist chat history on browser close or page refresh.
-- Automatic websocket reconnection.
-- Responsive web design.
+## Solution
 
-### Screenshots
-<img src="https://user-images.githubusercontent.com/50090692/202243227-022dfe85-c36c-49d0-a46d-7db1d2bae16f.png" alt="" data-canonical-src="https://user-images.githubusercontent.com/50090692/202243227-022dfe85-c36c-49d0-a46d-7db1d2bae16f.png" width="50%" height="50%" />
+NexusChat keeps the chat platform split into focused services and adds AI as a separate service:
 
-<img src="https://i.imgur.com/4ctofQv.png" alt="" data-canonical-src="https://i.imgur.com/4ctofQv.png" width="40%" height="40%" />
+- Go services handle chat, identity, matching, forwarding, and uploads
+- Python AI service handles provider abstraction, prompts, context, streaming, workflows, audit, and future MCP integration
+- the chat service only forwards AI requests and never owns AI business rules
 
-<img src="https://user-images.githubusercontent.com/50090692/157266585-90082195-0517-47a2-a1ef-20d72fa3a3e6.png" alt="" data-canonical-src="https://user-images.githubusercontent.com/50090692/157266585-90082195-0517-47a2-a1ef-20d72fa3a3e6.png" width="40%" height="40%" />
+This keeps the chat runtime stable while AI capabilities evolve independently.
 
-<img src="https://user-images.githubusercontent.com/50090692/156815192-11a251fb-32ee-4888-b79c-aa64c97b407d.png" alt="" data-canonical-src="https://user-images.githubusercontent.com/50090692/156815192-11a251fb-32ee-4888-b79c-aa64c97b407d.png" width="40%" height="40%" />
+## Architecture
+
+### Runtime services
+
+- `web`: Next.js frontend
+- `user`: account, OAuth identity, profile, and session lookup
+- `match`: random matching workflow and channel creation trigger
+- `chat`: channel membership, websocket message flow, message persistence, roles, reactions, pins, search, and media listing
+- `forwarder`: maps channel/user sessions to chat subscribers
+- `uploader`: file upload and presigned access control
+- `ai-service`: independent Python AI microservice
+
+### System diagram
+
+<img width="828" alt="NexusChat architecture" src="https://github.com/user-attachments/assets/b1184f30-7167-45ab-9038-69e7c3a60c2a">
+
+### Boundary rules
+
+- transport handlers only parse and validate input
+- services own business use cases
+- repositories and clients own storage and network concerns
+- other services are called only through explicit clients or APIs
+- AI-specific logic stays in `ai-service`
+
+### Data ownership
+
+- `user` owns user profile and session records
+- `match` owns wait-list state and match results
+- `chat` owns channel membership, message history, reactions, pinned messages, and roles
+- `forwarder` owns transient subscriber/session routing
+- `uploader` owns upload authorization and object naming
+- `ai-service` owns AI requests, responses, workflows, audit logs, settings, and memory
+
+## Tech Stack
+
+| Layer | Stack |
+|---|---|
+| Backend | 🐹 Go 1.24 |
+| AI service | 🐍 Python 3.12+, FastAPI, Pydantic, SQLAlchemy, Alembic, httpx |
+| Frontend | ⚛️ Next.js 15, React 19, TypeScript |
+| Messaging | 📨 Kafka |
+| Cache | ⚡ Redis |
+| Chat storage | 🪨 Cassandra |
+| AI storage | 🐘 PostgreSQL |
+| Uploads | 🪣 MinIO / S3-compatible storage |
+| API routing | 🌐 Traefik |
+| Observability | 📈 Prometheus, 🔭 OpenTelemetry, Jaeger |
+| Testing | ✅ Go test, pytest |
+| Containerization | 🐳 Docker, Docker Compose |
+
+## Features
+
+### Chat platform
+
+- real-time websocket chat
+- channel authentication with JWT
+- user matching with idempotency
+- message persistence and pagination
+- reactions, pinning, editing, deleting, and seen state
+- typing indicators and delivery status
+- media uploads and presigned access control
+- distributed rate limiting for file upload
+- browser history persistence and reconnection behavior
+
+### AI platform
+
+- provider abstraction for any OpenAI-compatible endpoint
+- context-aware rewrite, summary, translation, and workflow preview
+- SSE streaming foundation
+- agent participant foundation
+- workflow draft generation
+- semantic memory and audit storage
+- MCP preview-only foundation
+- AI UI controls inside the chat composer
+
+## AI Service Design
+
+The AI layer is intentionally separate from the chat core.
+
+### Responsibilities inside `ai-service`
+
+- prompt building
+- context building
+- provider communication
+- streaming
+- agent execution
+- workflow drafting
+- audit logging
+- semantic search
+- memory
+- MCP registry and preview policy
+
+### Supported provider model
+
+`ai-service` is configured through environment variables and works with any OpenAI-compatible endpoint:
+
+- OpenAI
+- OpenRouter
+- LiteLLM
+- Ollama-compatible gateway
+- vLLM
+- self-hosted AI gateway
+
+### AI service API
+
+- `GET /health`
+- `GET /ready`
+- `GET /metrics`
+- `POST /v1/assistant/rewrite`
+- `POST /v1/assistant/rewrite/stream`
+- `POST /v1/workflows/draft`
+- `POST /v1/agents`
+- `GET /v1/agents`
+- `GET /v1/mcp/tools`
+- `POST /v1/mcp/tools/preview`
+
+## Repository Layout
+
+- `cmd/`: Cobra entry points for Go services
+- `pkg/chat/`: chat service logic, HTTP, gRPC, repositories, subscribers
+- `pkg/user/`: user service logic
+- `pkg/match/`: matching workflow
+- `pkg/forwarder/`: subscriber routing
+- `pkg/uploader/`: upload service
+- `pkg/web/`: frontend server
+- `pkg/common/`: shared middleware, observability, auth, logging
+- `pkg/infra/`: Redis, Kafka, Cassandra clients
+- `internal/wire/`: dependency injection wiring
+- `frontend/`: Next.js chat client
+- `ai-service/`: standalone Python AI microservice
+- `proto/`: protobuf contracts
+- `docs/`: architecture notes and generated API docs
 
 ## Getting Started
 
-Prerequisite:
-- Docker-Compose v2
-- Root permission
+### Prerequisites
 
-First, [create OAuth client ID credentials](https://developers.google.com/workspace/guides/create-credentials#web-application) and replace `USER_OAUTH_GOOGLE_CLIENTID` and `USER_OAUTH_GOOGLE_CLIENTSECRET` with your credentials in `run.sh`.
+- Docker Engine and Docker Compose v2
+- Google OAuth credentials for `user` service if you want login to work end to end
+- an OpenAI-compatible AI endpoint if you want AI features to produce real output
 
-Example setting:
+### 1. Configure environment
 
-<img src="https://user-images.githubusercontent.com/50090692/207066730-cbfd869e-9658-46ea-94a9-c3c329cd5731.png" alt="" data-canonical-src="https://user-images.githubusercontent.com/50090692/207066730-cbfd869e-9658-46ea-94a9-c3c329cd5731.png" width="40%" height="40%" />
+Root `.env` should contain the runtime variables for the Go stack, for example:
 
-To run locally, execute the following command:
+```env
+REDIS_PASSWORD=pass.123
+JWT_SECRET=mysecret
+USER_OAUTH_GOOGLE_CLIENTID=
+USER_OAUTH_GOOGLE_CLIENTSECRET=
+```
+
+`ai-service/.env` contains AI-specific local dev settings and is loaded directly by compose:
+
+```env
+AI_SERVICE_NAME=nexuschat-ai-service
+AI_ENV=local
+AI_HOST=0.0.0.0
+AI_PORT=8090
+AI_ENDPOINT=https://your-openai-compatible-endpoint/v1
+AI_API_KEY=your_api_key
+AI_MODEL=your_model
+AI_REQUEST_TIMEOUT_SECONDS=60
+AI_POSTGRES_PASSWORD=nexuschat_ai
+DATABASE_URL=postgresql+asyncpg://nexuschat_ai:nexuschat_ai@localhost:5432/nexuschat_ai
+REDIS_URL=redis://localhost:6379/0
+CHAT_SERVICE_BASE_URL=http://localhost/api/chat
+OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+```
+
+### 2. Start the full stack
+
 ```bash
-cd deployments
-sudo ./run.sh add-host
-./run.sh start
+docker compose up --build -d
 ```
-`run.sh add-host` needs root permission to alias `minio` to `localhost` in `/etc/hosts`.
 
-Check cassandra connection:
-```
-docker exec deployments-cassandra-1 bash -c "cat /opt/bitnami/cassandra/logs/cassandra.log"
-docker exec deployments-cassandra-1 bash -c "cqlsh -u ming -p cassandrapass"
-```
-This will spin up all services declared in `docker-compose.yaml`. Visit `http://localhost` and you will see the application home page.
+This starts:
 
-Bucket `myfilebucket` will be created automatically on `minio` by `createbucket`. However, if `minio` is still initializing after 5 retries of `createbucket`, the bucket creation will fail. If this happens, please run the following command once `minio` is up and running:
+- frontend
+- `user`, `match`, `chat`, `forwarder`, `uploader`
+- `ai-service`
+- Redis
+- Kafka
+- Cassandra
+- `ai-postgres`
+- MinIO
+- Traefik
+- Prometheus
+- Jaeger
+
+### 3. Verify services
+
 ```bash
-docker restart deployments-createbucket-1
+docker compose ps
+docker compose logs -f ai-service
+docker compose logs -f random-chat
 ```
 
-- Visit `http://localhost` for the application home page.
-- Visit `http://localhost:8080` for Traefik dashboard.
-- VIsit `http://localhost:9001` for Minio dashboard.
-- Visit `http://localhost:9090` for Prometheus dashboard.
-- Visit `http://localhost:16686` for Jaeger dashboard.
-- Visit `http://localhost/api/<svc>/swagger/index.html` for API documentation, where `<svc>` could be `user`, `match`, `chat`, or `uploader`.
+### 4. Open the app
 
-Example configuration: [config.example.yaml](configs/config.example.yaml).
-## Deploy with SSL
-A common scenario is that one deploys the application behind a reverse proxy with SSL termination. If that is your case, remember to correctly configure your proxy for websocket. For example, in Google Cloud Platform, for websocket traffic sent through a Google Cloud external HTTP(S) load balancer, the backend service timeout is interpreted as the maximum amount of time that a WebSocket connection can remain open, whether idle or not. Therefore, you may want to use a `timeoutSec` value larger than the default 30 seconds in your `BackendConfig`.
+- `http://localhost` for the web app
+- `http://localhost:8080` for Traefik dashboard
+- `http://localhost:9001` for MinIO dashboard
+- `http://localhost:9090` for Prometheus
+- `http://localhost:16686` for Jaeger
+- `http://localhost/api/user/swagger/index.html`
+- `http://localhost/api/match/swagger/index.html`
+- `http://localhost/api/chat/swagger/index.html`
+- `http://localhost/api/uploader/swagger/index.html`
+
+## How To Test AI In The UI
+
+The AI controls are inside the chat composer.
+
+### Rewrite flow
+
+1. Open `http://localhost`
+2. Sign in and enter a chat room
+3. Type a draft message
+4. Click the `Sparkles` button next to the composer
+5. Choose one of:
+   - `Professional`
+   - `Friendly`
+   - `Shorter`
+6. The rewritten text replaces the draft in the input box
+7. Press send to publish it as a normal chat message
+
+### Workflow preview flow
+
+1. Type a draft message
+2. Click the `Sparkles` button
+3. Choose one of:
+   - `Tasks`
+   - `Notes`
+   - `Checklist`
+4. The AI preview appears above the composer
+5. Review it before doing anything else
+
+### Direct backend test
+
+```bash
+curl -X POST http://localhost/api/chat/ai/rewrite \
+  -H "Authorization: Bearer <channel_access_token>" \
+  -H "Content-Type: application/json" \
+  -d "{\"text\":\"xin chao toi muon viet lai cau nay\",\"tone\":\"professional\",\"locale\":\"Vietnamese\"}"
+```
+
+### Direct AI service test
+
+```bash
+curl -X POST http://localhost/api/ai/v1/assistant/rewrite \
+  -H "Content-Type: application/json" \
+  -d "{\"text\":\"xin chao toi muon viet lai cau nay\",\"tone\":\"professional\",\"locale\":\"Vietnamese\"}"
+```
+
+## Development Commands
+
+### Go backend
+
+```bash
+go test ./...
+go build ./...
+```
+
+### Frontend
+
+```bash
+npm --prefix frontend run build
+npm --prefix frontend run dev
+```
+
+### AI service
+
+```bash
+cd ai-service
+python -m pytest
+python -m ruff check .
+python -m uvicorn app.main:app --reload
+```
+
+## Operational Notes
+
+- `chat` remains the source of truth for chat persistence and websocket behavior
+- AI features are additive and do not replace the existing chat flow
+- AI requests are routed through the chat service only when the UI uses the chat composer AI action
+- AI database is separate from Cassandra to keep AI state isolated
+- AI provider keys should be rotated and never committed to version control
+
+## Docs
+
+- [Architecture](docs/architecture.md)
+- [AI Service Plan](docs/ai-service-plan.md)
+- [Engineering Docs Index](docs/README.md)
+- [AI service README](ai-service/README.md)
+
 ## Docker Tagging Rules
-| Event          | Ref                        | Docker Tags                |
-| -------------- | -------------------------- | -------------------------- |
-| `pull_request` | `refs/pull/2/merge`        | `pr-2`                     |
-| `push`         | `refs/heads/master`        | `master`                   |
-| `push`         | `refs/heads/releases/v1`   | `releases-v1`              |
-| `push tag`     | `refs/tags/v1.2.3`         | `v1.2.3`, `latest`         |
-| `push tag`     | `refs/tags/v2.0.8-beta.67` | `v2.0.8-beta.67`, `latest` |
+
+| Event | Ref | Docker Tags |
+|---|---|---|
+| `pull_request` | `refs/pull/2/merge` | `pr-2` |
+| `push` | `refs/heads/master` | `master` |
+| `push` | `refs/heads/releases/v1` | `releases-v1` |
+| `push tag` | `refs/tags/v1.2.3` | `v1.2.3`, `latest` |
+| `push tag` | `refs/tags/v2.0.8-beta.67` | `v2.0.8-beta.67`, `latest` |

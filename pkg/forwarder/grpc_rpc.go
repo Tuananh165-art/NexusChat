@@ -3,7 +3,7 @@ package forwarder
 import (
 	"context"
 
-	forwarderpb "github.com/minghsu0107/go-random-chat/proto/forwarder"
+	forwarderpb "github.com/Tuananh165-art/NexusChat/proto/forwarder"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

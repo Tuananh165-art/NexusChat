@@ -8,10 +8,10 @@ import (
 
 	"log/slog"
 
-	"github.com/minghsu0107/go-random-chat/pkg/common"
-	"github.com/minghsu0107/go-random-chat/pkg/config"
-	"github.com/minghsu0107/go-random-chat/pkg/transport"
-	forwarderpb "github.com/minghsu0107/go-random-chat/proto/forwarder"
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/config"
+	"github.com/Tuananh165-art/NexusChat/pkg/transport"
+	forwarderpb "github.com/Tuananh165-art/NexusChat/proto/forwarder"
 )
 
 type GrpcServer struct {

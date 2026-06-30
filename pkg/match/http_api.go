@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/minghsu0107/go-random-chat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
 	"gopkg.in/olahol/melody.v1"
 )
 
@@ -64,12 +64,34 @@ func (r *HttpServer) HandleMatchOnConnect(sess *melody.Session) {
 	}
 	if err := r.matchSvc.BroadcastMatchResult(ctx, matchResult); err != nil {
 		r.logger.Error(err.Error())
-		return
 	}
+	r.deliverMatchResult(ctx, matchResult)
 }
 func (r *HttpServer) initializeMatchSession(sess *melody.Session, userID uint64) error {
 	sess.Set(sessUidKey, userID)
 	return nil
+}
+func (r *HttpServer) deliverMatchResult(ctx context.Context, result *MatchResult) {
+	payload := result.ToPresenter().Encode()
+	r.mm.BroadcastFilter(payload, func(sess *melody.Session) bool {
+		uid, exist := sess.Get(sessUidKey)
+		if !exist {
+			return false
+		}
+		userID := uid.(uint64)
+		if userID == result.PeerID || userID == result.UserID {
+			if matched, _ := sess.Get(sessMatchedKey); matched == true {
+				return false
+			}
+			if err := r.userSvc.AddUserToChannel(ctx, result.ChannelID, userID); err != nil {
+				r.logger.Error("add user to channel error: " + err.Error())
+				return false
+			}
+			sess.Set(sessMatchedKey, true)
+			return true
+		}
+		return false
+	})
 }
 func (r *HttpServer) HandleMatchOnClose(sess *melody.Session, i int, s string) error {
 	userID, ok := sess.Request.Context().Value(common.UserKey).(uint64)

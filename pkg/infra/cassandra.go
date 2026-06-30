@@ -2,8 +2,8 @@ package infra
 
 import (
 	"github.com/gocql/gocql"
-	"github.com/minghsu0107/go-random-chat/pkg/common"
-	"github.com/minghsu0107/go-random-chat/pkg/config"
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/config"
 )
 
 var CassandraSession *gocql.Session

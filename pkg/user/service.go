@@ -10,7 +10,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/minghsu0107/go-random-chat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
 )
 
 const oauthGoogleUrlAPI = "https://www.googleapis.com/oauth2/v3/userinfo?access_token="
@@ -19,6 +19,7 @@ type UserService interface {
 	GetGoogleUser(ctx context.Context, code string) (*GoogleUserPresenter, error)
 	GetOrCreateUserByOAuth(ctx context.Context, user *User) (*User, error)
 	CreateUser(ctx context.Context, user *User) (*User, error)
+	UpdateUserProfile(ctx context.Context, uid uint64, name, picture string) (*User, error)
 	SetUserSession(ctx context.Context, uid uint64) (string, error)
 	GetUserByID(ctx context.Context, uid uint64) (*User, error)
 	GetUserIDBySession(ctx context.Context, sid string) (uint64, error)
@@ -76,6 +77,19 @@ func (svc *UserServiceImpl) CreateUser(ctx context.Context, user *User) (*User, 
 		return nil, fmt.Errorf("error create user %d: %w", userID, err)
 	}
 	return newUser, nil
+}
+
+func (svc *UserServiceImpl) UpdateUserProfile(ctx context.Context, uid uint64, name, picture string) (*User, error) {
+	user, err := svc.userRepo.GetUserByID(ctx, uid)
+	if err != nil {
+		return nil, fmt.Errorf("error get user %d: %w", uid, err)
+	}
+	user.Name = name
+	user.Picture = picture
+	if err := svc.userRepo.UpdateUser(ctx, user); err != nil {
+		return nil, fmt.Errorf("error update user %d: %w", uid, err)
+	}
+	return user, nil
 }
 
 func (svc *UserServiceImpl) SetUserSession(ctx context.Context, uid uint64) (string, error) {

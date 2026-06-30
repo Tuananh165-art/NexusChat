@@ -4,7 +4,7 @@ import (
 	log "log/slog"
 	"os"
 
-	"github.com/minghsu0107/go-random-chat/internal/wire"
+	"github.com/Tuananh165-art/NexusChat/internal/wire"
 	"github.com/spf13/cobra"
 )
 

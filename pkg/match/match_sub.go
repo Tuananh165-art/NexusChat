@@ -55,12 +55,16 @@ func (s *MatchSubscriber) sendMatchResult(ctx context.Context, result *MatchResu
 		if !exist {
 			return false
 		}
+		if matched, _ := sess.Get(sessMatchedKey); matched == true {
+			return false
+		}
 		userID := uid.(uint64)
 		if (userID == result.PeerID) || (userID == result.UserID) {
 			if err := s.userSvc.AddUserToChannel(ctx, result.ChannelID, userID); err != nil {
 				slog.Error(err.Error())
 				return false
 			}
+			sess.Set(sessMatchedKey, true)
 			return true
 		}
 		return false

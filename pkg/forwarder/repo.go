@@ -6,9 +6,9 @@ import (
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
-	"github.com/minghsu0107/go-random-chat/pkg/chat"
-	"github.com/minghsu0107/go-random-chat/pkg/common"
-	"github.com/minghsu0107/go-random-chat/pkg/infra"
+	"github.com/Tuananh165-art/NexusChat/pkg/chat"
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/infra"
 )
 
 var (

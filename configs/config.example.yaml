@@ -25,6 +25,9 @@ chat:
   jwt:
     secret: mysecret
     expirationSecond: 86400
+ai:
+  baseURL: "http://localhost:8090"
+  requestTimeoutMilli: 30000
 forwarder:
   grpc:
     server:
@@ -88,9 +91,9 @@ kafka:
 cassandra:
   hosts: cassandra-host-0,cassandra-host-1,cassandra-host-2
   port: 9042
-  user: cassandra
-  password: cassandra
-  keyspace: randomchat
+  user: admin
+  password: nexuschat165
+  keyspace: NexusChat
 redis:
   password: pass.123
   addrs: redis-node-0:6379,redis-node-1:6379,redis-node-2:6379

@@ -6,15 +6,15 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/config"
 	"github.com/gin-gonic/gin"
-	"github.com/minghsu0107/go-random-chat/pkg/common"
-	"github.com/minghsu0107/go-random-chat/pkg/config"
 	metrics "github.com/slok/go-http-metrics/metrics/prometheus"
 	prommiddleware "github.com/slok/go-http-metrics/middleware"
 	ginmiddleware "github.com/slok/go-http-metrics/middleware/gin"
 	"gopkg.in/olahol/melody.v1"
 
-	doc "github.com/minghsu0107/go-random-chat/docs/chat"
+	doc "github.com/Tuananh165-art/NexusChat/docs/chat"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
@@ -41,6 +41,7 @@ type HttpServer struct {
 	msgSvc        MessageService
 	chanSvc       ChannelService
 	forwardSvc    ForwardService
+	aiSvc         AIService
 	serveSwag     bool
 }
 
@@ -69,7 +70,7 @@ func NewGinServer(name string, logger common.HttpLog, config *config.Config) *gi
 	return svr
 }
 
-func NewHttpServer(name string, logger common.HttpLog, config *config.Config, svr *gin.Engine, mc MelodyChatConn, msgSubscriber *MessageSubscriber, userSvc UserService, msgSvc MessageService, chanSvc ChannelService, forwardSvc ForwardService) *HttpServer {
+func NewHttpServer(name string, logger common.HttpLog, config *config.Config, svr *gin.Engine, mc MelodyChatConn, msgSubscriber *MessageSubscriber, userSvc UserService, msgSvc MessageService, chanSvc ChannelService, forwardSvc ForwardService, aiSvc AIService) *HttpServer {
 	initJWT(config)
 
 	return &HttpServer{
@@ -83,6 +84,7 @@ func NewHttpServer(name string, logger common.HttpLog, config *config.Config, sv
 		msgSvc:        msgSvc,
 		chanSvc:       chanSvc,
 		forwardSvc:    forwardSvc,
+		aiSvc:         aiSvc,
 		serveSwag:     config.Chat.Http.Server.Swag,
 	}
 }
@@ -97,7 +99,7 @@ func initJWT(config *config.Config) {
 // @description     Chat service API
 
 // @contact.name   Ming Hsu
-// @contact.email  minghsu0107@gmail.com
+// @contact.email  Tuananh165-art@gmail.com
 
 // @BasePath  /api
 func (r *HttpServer) RegisterRoutes() {
@@ -123,7 +125,27 @@ func (r *HttpServer) RegisterRoutes() {
 		channelGroup.Use(common.JWTAuth())
 		{
 			channelGroup.GET("/messages", r.ListMessages)
+			channelGroup.GET("/pins", r.GetPinnedMessages)
+			channelGroup.GET("/search", r.SearchMessages)
+			channelGroup.GET("/media", r.ListMediaMessages)
 			channelGroup.DELETE("", r.DeleteChannel)
+		}
+		roleGroup := chatGroup.Group("/role")
+		roleGroup.Use(common.JWTAuth())
+		{
+			roleGroup.GET("", r.GetMyRole)
+			roleGroup.PUT("", r.AssignRole)
+		}
+		notifGroup := chatGroup.Group("/notification")
+		notifGroup.Use(common.JWTAuth())
+		{
+			notifGroup.GET("/prefs", r.GetNotificationPrefs)
+			notifGroup.PUT("/prefs", r.SetNotificationPrefs)
+		}
+		aiGroup := chatGroup.Group("/ai")
+		aiGroup.Use(common.JWTAuth())
+		{
+			aiGroup.POST("/rewrite", r.RewriteWithAI)
 		}
 	}
 	r.mc.HandleMessage(r.HandleChatOnMessage)

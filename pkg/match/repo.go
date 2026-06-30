@@ -8,10 +8,10 @@ import (
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/go-kit/kit/endpoint"
-	"github.com/minghsu0107/go-random-chat/pkg/infra"
-	"github.com/minghsu0107/go-random-chat/pkg/transport"
-	chatpb "github.com/minghsu0107/go-random-chat/proto/chat"
-	userpb "github.com/minghsu0107/go-random-chat/proto/user"
+	"github.com/Tuananh165-art/NexusChat/pkg/infra"
+	"github.com/Tuananh165-art/NexusChat/pkg/transport"
+	chatpb "github.com/Tuananh165-art/NexusChat/proto/chat"
+	userpb "github.com/Tuananh165-art/NexusChat/proto/user"
 )
 
 var (

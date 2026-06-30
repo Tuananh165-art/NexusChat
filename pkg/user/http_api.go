@@ -4,9 +4,10 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
 	"github.com/gin-gonic/gin"
-	"github.com/minghsu0107/go-random-chat/pkg/common"
 )
 
 // @Summary Create a local user
@@ -44,6 +45,55 @@ func (r *HttpServer) CreateLocalUser(c *gin.Context) {
 	c.JSON(http.StatusCreated, &UserPresenter{
 		ID:   strconv.FormatUint(user.ID, 10),
 		Name: user.Name,
+	})
+}
+
+// @Summary Update self user profile
+// @Description Update self user display name and avatar picture
+// @Tags user
+// @Produce json
+// @Param Cookie header string true "session id cookie"
+// @Param user body UpdateUserProfileRequest true "updated user profile"
+// @Success 200 {object} UserPresenter
+// @Failure 400 {object} common.ErrResponse
+// @Failure 401 {object} common.ErrResponse
+// @Failure 404 {object} common.ErrResponse
+// @Failure 500 {object} common.ErrResponse
+// @Router /user/me [put]
+func (r *HttpServer) UpdateUserMe(c *gin.Context) {
+	userID, ok := c.Request.Context().Value(common.UserKey).(uint64)
+	if !ok {
+		response(c, http.StatusUnauthorized, common.ErrUnauthorized)
+		return
+	}
+	var updateReq UpdateUserProfileRequest
+	if err := c.ShouldBindJSON(&updateReq); err != nil {
+		response(c, http.StatusBadRequest, common.ErrInvalidParam)
+		return
+	}
+	name := strings.TrimSpace(updateReq.Name)
+	if name == "" || len([]rune(name)) > 30 {
+		response(c, http.StatusBadRequest, common.ErrInvalidParam)
+		return
+	}
+	if len(updateReq.Picture) > 1024*1024 {
+		response(c, http.StatusBadRequest, common.ErrInvalidParam)
+		return
+	}
+	user, err := r.userSvc.UpdateUserProfile(c.Request.Context(), userID, name, updateReq.Picture)
+	if err != nil {
+		if errors.Is(err, ErrUserNotFound) {
+			response(c, http.StatusNotFound, ErrUserNotFound)
+			return
+		}
+		r.logger.Error(err.Error())
+		response(c, http.StatusInternalServerError, common.ErrServer)
+		return
+	}
+	c.JSON(http.StatusOK, &UserPresenter{
+		ID:      strconv.FormatUint(userID, 10),
+		Name:    user.Name,
+		Picture: user.Picture,
 	})
 }
 

@@ -4,6 +4,11 @@ type CreateLocalUserRequest struct {
 	Name string `json:"name" binding:"required"`
 }
 
+type UpdateUserProfileRequest struct {
+	Name    string `json:"name" binding:"required"`
+	Picture string `json:"picture"`
+}
+
 type GetUserRequest struct {
 	Uid string `form:"uid" binding:"required"`
 }

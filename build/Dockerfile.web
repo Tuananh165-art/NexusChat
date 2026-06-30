@@ -1,3 +1,11 @@
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /app/frontend
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm install
+COPY frontend/ ./
+RUN npm run build
+
 FROM golang:1.24 AS builder
 
 RUN mkdir -p /app
@@ -9,14 +17,14 @@ RUN go mod download
 COPY . .
 ARG VERSION
 RUN make dep
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-X github.com/minghsu0107/go-random-chat/cmd.Version=$VERSION -w -s" -o server ./randomchat.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-X github.com/Tuananh165-art/NexusChat/cmd.Version=$VERSION -w -s" -o server ./main.go
 
 FROM alpine:3.14
 RUN apk update && apk add --no-cache ca-certificates
 
-RUN mkdir -p /app/web
+RUN mkdir -p /app/frontend/out
 WORKDIR /app
 COPY --from=builder /app/server /app/server
-COPY --from=builder /app/web /app/web
+COPY --from=frontend-builder /app/frontend/out /app/frontend/out
 
 ENTRYPOINT ["/app/server", "web"]

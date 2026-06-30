@@ -7,14 +7,14 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/config"
 	"github.com/gin-gonic/gin"
-	"github.com/minghsu0107/go-random-chat/pkg/common"
-	"github.com/minghsu0107/go-random-chat/pkg/config"
 	metrics "github.com/slok/go-http-metrics/metrics/prometheus"
 	prommiddleware "github.com/slok/go-http-metrics/middleware"
 	ginmiddleware "github.com/slok/go-http-metrics/middleware/gin"
 
-	doc "github.com/minghsu0107/go-random-chat/docs/user"
+	doc "github.com/Tuananh165-art/NexusChat/docs/user"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"golang.org/x/oauth2"
@@ -91,7 +91,7 @@ func (r *HttpServer) CookieAuth() gin.HandlerFunc {
 // @description     User service API
 
 // @contact.name   Ming Hsu
-// @contact.email  minghsu0107@gmail.com
+// @contact.email  Tuananh165-art@gmail.com
 
 // @BasePath  /api
 func (r *HttpServer) RegisterRoutes() {
@@ -103,6 +103,7 @@ func (r *HttpServer) RegisterRoutes() {
 		cookieAuthGroup.Use(r.CookieAuth())
 		cookieAuthGroup.GET("", r.GetUser)
 		cookieAuthGroup.GET("/me", r.GetUserMe)
+		cookieAuthGroup.PUT("/me", r.UpdateUserMe)
 
 		userGroup.GET("/oauth2/google/login", r.OAuthGoogleLogin)
 		userGroup.GET("/oauth2/google/callback", r.OAuthGoogleCallback)

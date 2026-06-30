@@ -7,20 +7,21 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
-	"github.com/minghsu0107/go-random-chat/pkg/common"
-	"github.com/minghsu0107/go-random-chat/pkg/config"
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/config"
 	metrics "github.com/slok/go-http-metrics/metrics/prometheus"
 	prommiddleware "github.com/slok/go-http-metrics/middleware"
 	ginmiddleware "github.com/slok/go-http-metrics/middleware/gin"
 	"gopkg.in/olahol/melody.v1"
 
-	doc "github.com/minghsu0107/go-random-chat/docs/match"
+	doc "github.com/Tuananh165-art/NexusChat/docs/match"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 var (
-	sessUidKey = "sessuid"
+	sessUidKey     = "sessuid"
+	sessMatchedKey = "sessmatched"
 
 	MelodyMatch MelodyMatchConn
 )
@@ -101,7 +102,7 @@ func (r *HttpServer) CookieAuth() gin.HandlerFunc {
 // @description     Match service API
 
 // @contact.name   Ming Hsu
-// @contact.email  minghsu0107@gmail.com
+// @contact.email  Tuananh165-art@gmail.com
 
 // @BasePath  /api
 func (r *HttpServer) RegisterRoutes() {

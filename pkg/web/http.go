@@ -7,8 +7,8 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
-	"github.com/minghsu0107/go-random-chat/pkg/common"
-	"github.com/minghsu0107/go-random-chat/pkg/config"
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/config"
 	metrics "github.com/slok/go-http-metrics/metrics/prometheus"
 	prommiddleware "github.com/slok/go-http-metrics/middleware"
 	ginmiddleware "github.com/slok/go-http-metrics/middleware/gin"
@@ -46,13 +46,14 @@ func NewHttpServer(name string, logger common.HttpLog, config *config.Config, sv
 }
 
 func (r *HttpServer) RegisterRoutes() {
-	r.svr.LoadHTMLGlob("web/html/*")
-	r.svr.Static("/assets", "./web/assets")
+	r.svr.Static("/_next", "./frontend/out/_next")
+	r.svr.StaticFile("/favicon.ico", "./frontend/out/favicon.ico")
+
 	r.svr.GET("", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "home.html", nil)
+		c.File("./frontend/out/index.html")
 	})
 	r.svr.GET("/chat", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "chat.html", nil)
+		c.File("./frontend/out/chat.html")
 	})
 }
 

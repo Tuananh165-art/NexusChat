@@ -42,7 +42,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v3
         with:
-          images: minghsu0107/random-chat-api
+          images: Tuananh165-art/random-chat-api
           
       - name: Build and push Docker image
         uses: docker/build-push-action@v2

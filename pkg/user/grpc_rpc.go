@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	userpb "github.com/minghsu0107/go-random-chat/proto/user"
+	userpb "github.com/Tuananh165-art/NexusChat/proto/user"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/ThreeDotsLabs/watermill/message"
-	"github.com/minghsu0107/go-random-chat/pkg/chat"
+	"github.com/Tuananh165-art/NexusChat/pkg/chat"
 )
 
 type MessageSubscriber struct {

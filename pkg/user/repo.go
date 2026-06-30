@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/minghsu0107/go-random-chat/pkg/common"
-	"github.com/minghsu0107/go-random-chat/pkg/infra"
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/infra"
 )
 
 var (
@@ -16,6 +16,7 @@ var (
 
 type UserRepo interface {
 	CreateUser(ctx context.Context, user *User) error
+	UpdateUser(ctx context.Context, user *User) error
 	GetUserByID(ctx context.Context, userID uint64) (*User, error)
 	GetUserByOAuthEmail(ctx context.Context, authType AuthType, email string) (*User, error)
 	SetUserSession(ctx context.Context, uid uint64, sid string) error
@@ -31,6 +32,22 @@ func NewUserRepoImpl(r infra.RedisCache) *UserRepoImpl {
 }
 
 func (repo *UserRepoImpl) CreateUser(ctx context.Context, user *User) error {
+	data, err := json.Marshal(user)
+	if err != nil {
+		return err
+	}
+	if err = repo.r.Set(ctx, constructKey(userPrefix, user.ID), data); err != nil {
+		return err
+	}
+	if user.AuthType != LocalAuth {
+		if err = repo.r.Set(ctx, constructOAuthKey(user.AuthType, user.Email), data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (repo *UserRepoImpl) UpdateUser(ctx context.Context, user *User) error {
 	data, err := json.Marshal(user)
 	if err != nil {
 		return err

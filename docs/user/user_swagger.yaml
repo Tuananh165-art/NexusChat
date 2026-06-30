@@ -23,7 +23,7 @@ definitions:
     type: object
 info:
   contact:
-    email: minghsu0107@gmail.com
+    email: Tuananh165-art@gmail.com
     name: Ming Hsu
   description: User service API
   title: User Service Swagger API

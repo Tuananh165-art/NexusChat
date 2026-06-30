@@ -1,3 +1,7 @@
 server
 cover.out
 .DS_Store
+.env
+frontend/out
+frontend/.next
+frontend/node_modules

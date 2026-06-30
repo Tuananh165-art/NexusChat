@@ -7,15 +7,15 @@
 package wire
 
 import (
-	"github.com/minghsu0107/go-random-chat/pkg/chat"
-	"github.com/minghsu0107/go-random-chat/pkg/common"
-	"github.com/minghsu0107/go-random-chat/pkg/config"
-	"github.com/minghsu0107/go-random-chat/pkg/forwarder"
-	"github.com/minghsu0107/go-random-chat/pkg/infra"
-	"github.com/minghsu0107/go-random-chat/pkg/match"
-	"github.com/minghsu0107/go-random-chat/pkg/uploader"
-	"github.com/minghsu0107/go-random-chat/pkg/user"
-	"github.com/minghsu0107/go-random-chat/pkg/web"
+	"github.com/Tuananh165-art/NexusChat/pkg/chat"
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/config"
+	"github.com/Tuananh165-art/NexusChat/pkg/forwarder"
+	"github.com/Tuananh165-art/NexusChat/pkg/infra"
+	"github.com/Tuananh165-art/NexusChat/pkg/match"
+	"github.com/Tuananh165-art/NexusChat/pkg/uploader"
+	"github.com/Tuananh165-art/NexusChat/pkg/user"
+	"github.com/Tuananh165-art/NexusChat/pkg/web"
 )
 
 // Injectors from wire.go:
@@ -97,7 +97,9 @@ func InitializeChatServer(name string) (*common.Server, error) {
 	}
 	forwardRepoImpl := chat.NewForwardRepoImpl(forwarderClientConn)
 	forwardServiceImpl := chat.NewForwardServiceImpl(forwardRepoImpl)
-	httpServer := chat.NewHttpServer(name, httpLog, configConfig, engine, melodyChatConn, messageSubscriber, userServiceImpl, messageServiceImpl, channelServiceImpl, forwardServiceImpl)
+	aiClientImpl := chat.NewAIClientImpl(configConfig)
+	aiServiceImpl := chat.NewAIServiceImpl(aiClientImpl)
+	httpServer := chat.NewHttpServer(name, httpLog, configConfig, engine, melodyChatConn, messageSubscriber, userServiceImpl, messageServiceImpl, channelServiceImpl, forwardServiceImpl, aiServiceImpl)
 	grpcLog, err := common.NewGrpcLog(configConfig)
 	if err != nil {
 		return nil, err

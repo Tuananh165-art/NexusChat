@@ -7,10 +7,10 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/minghsu0107/go-random-chat/pkg/common"
-	"github.com/minghsu0107/go-random-chat/pkg/config"
-	"github.com/minghsu0107/go-random-chat/pkg/transport"
-	userpb "github.com/minghsu0107/go-random-chat/proto/user"
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/config"
+	"github.com/Tuananh165-art/NexusChat/pkg/transport"
+	userpb "github.com/Tuananh165-art/NexusChat/proto/user"
 )
 
 type GrpcServer struct {

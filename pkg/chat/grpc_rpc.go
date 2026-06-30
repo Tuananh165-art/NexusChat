@@ -3,7 +3,7 @@ package chat
 import (
 	"context"
 
-	chatpb "github.com/minghsu0107/go-random-chat/proto/chat"
+	chatpb "github.com/Tuananh165-art/NexusChat/proto/chat"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

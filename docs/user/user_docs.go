@@ -12,7 +12,7 @@ const docTemplateuser = `{
         "title": "{{.Title}}",
         "contact": {
             "name": "Ming Hsu",
-            "email": "minghsu0107@gmail.com"
+            "email": "Tuananh165-art@gmail.com"
         },
         "version": "{{.Version}}"
     },

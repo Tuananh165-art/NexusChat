@@ -1,7 +1,7 @@
 package forwarder
 
 import (
-	"github.com/minghsu0107/go-random-chat/pkg/infra"
+	"github.com/Tuananh165-art/NexusChat/pkg/infra"
 )
 
 type InfraCloser struct{}

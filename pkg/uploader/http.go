@@ -14,14 +14,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
-	"github.com/minghsu0107/go-random-chat/pkg/common"
-	"github.com/minghsu0107/go-random-chat/pkg/config"
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/config"
 	"github.com/redis/go-redis/v9"
 	metrics "github.com/slok/go-http-metrics/metrics/prometheus"
 	prommiddleware "github.com/slok/go-http-metrics/middleware"
 	ginmiddleware "github.com/slok/go-http-metrics/middleware/gin"
 
-	doc "github.com/minghsu0107/go-random-chat/docs/uploader"
+	doc "github.com/Tuananh165-art/NexusChat/docs/uploader"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 )
@@ -48,6 +48,7 @@ type HttpServer struct {
 	s3Endpoint               string
 	s3Bucket                 string
 	maxMemory                int64
+	s3Client                 *s3.Client
 	uploader                 *manager.Uploader
 	presigner                *Presigner
 	httpPort                 string
@@ -93,6 +94,7 @@ func NewHttpServer(name string, logger common.HttpLog, config *config.Config, sv
 		s3Endpoint:               s3Endpoint,
 		s3Bucket:                 s3Bucket,
 		maxMemory:                config.Uploader.Http.Server.MaxMemoryByte,
+		s3Client:                 s3Client,
 		uploader:                 manager.NewUploader(s3Client),
 		presigner:                &Presigner{s3.NewPresignClient(s3Client), config.Uploader.S3.PresignLifetimeSecond},
 		httpPort:                 config.Uploader.Http.Server.Port,
@@ -127,7 +129,7 @@ func (r *HttpServer) ChannelUploadRateLimit() gin.HandlerFunc {
 // @description     Uploader service API
 
 // @contact.name   Ming Hsu
-// @contact.email  minghsu0107@gmail.com
+// @contact.email  Tuananh165-art@gmail.com
 
 // @BasePath  /api
 func (r *HttpServer) RegisterRoutes() {
@@ -139,11 +141,19 @@ func (r *HttpServer) RegisterRoutes() {
 		{
 			uploadGroup.POST("/files", r.UploadFiles)
 			uploadGroup.GET("/presigned", r.GetPresignedUpload)
+			chunkGroup := uploadGroup.Group("/chunk")
+			{
+				chunkGroup.POST("/init", r.InitChunkUpload)
+				chunkGroup.GET("/presign", r.GetChunkPresignedUrl)
+				chunkGroup.POST("/complete", r.CompleteChunkUpload)
+				chunkGroup.DELETE("/abort", r.AbortChunkUpload)
+			}
 		}
 		downloadGroup := uploaderGroup.Group("/download")
 		downloadGroup.Use(common.JWTForwardAuth())
 		{
 			downloadGroup.GET("/presigned", r.GetPresignedDownload)
+			downloadGroup.GET("/file", r.ProxyDownload)
 		}
 	}
 	if r.serveSwag {
