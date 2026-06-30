@@ -1,0 +1,55 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: nexuschat
+  namespace: argocd
+spec:
+  description: NexusChat application delivery project
+  sourceRepos:
+    - https://github.com/Tuananh165-art/NexusChat.git
+  destinations:
+    - namespace: nexuschat-staging
+      server: https://kubernetes.default.svc
+    - namespace: nexuschat-prod
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nexuschat-staging
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: nexuschat
+  source:
+    repoURL: https://github.com/Tuananh165-art/NexusChat.git
+    targetRevision: main
+    path: deployments/helm/nexuschat
+    helm:
+      releaseName: nexuschat
+      valueFiles:
+        - values.yaml
+      parameters:
+        - name: global.environment
+          value: staging
+        - name: global.domain
+          value: staging.nexuschat.example.com
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nexuschat-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

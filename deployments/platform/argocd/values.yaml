@@ -1,0 +1,27 @@
+global:
+  domain: argocd.nexuschat.example.com
+configs:
+  cm:
+    admin.enabled: "false"
+    timeout.reconciliation: 60s
+  params:
+    server.insecure: false
+server:
+  replicas: 2
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts:
+      - argocd.nexuschat.example.com
+    tls:
+      - secretName: argocd-tls
+        hosts:
+          - argocd.nexuschat.example.com
+controller:
+  replicas: 1
+repoServer:
+  replicas: 2
+applicationSet:
+  replicas: 2
+notifications:
+  enabled: true

@@ -1,0 +1,40 @@
+controller:
+  replicaCount: 2
+  ingressClassResource:
+    name: nginx
+    enabled: true
+    default: false
+  allowSnippetAnnotations: false
+  config:
+    enable-real-ip: "true"
+    use-forwarded-headers: "true"
+    proxy-body-size: "64m"
+    log-format-escape-json: "true"
+    log-format-upstream: '{"time":"$time_iso8601","remote_addr":"$remote_addr","request_id":"$req_id","host":"$host","method":"$request_method","uri":"$uri","status":$status,"bytes_sent":$bytes_sent,"request_time":$request_time,"upstream_response_time":"$upstream_response_time","user_agent":"$http_user_agent"}'
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      additionalLabels:
+        release: kube-prometheus-stack
+  service:
+    externalTrafficPolicy: Local
+  admissionWebhooks:
+    enabled: true
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - NET_BIND_SERVICE
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi

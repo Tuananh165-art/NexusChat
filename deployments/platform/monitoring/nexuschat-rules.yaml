@@ -1,0 +1,33 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: nexuschat-slo-rules
+  namespace: monitoring
+  labels:
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: nexuschat.availability
+      rules:
+        - alert: NexusChatHighHttpErrorRate
+          expr: sum(rate(http_server_requests_duration_seconds_count{code=~"5.."}[5m])) / sum(rate(http_server_requests_duration_seconds_count[5m])) > 0.02
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: NexusChat HTTP 5xx rate is above 2 percent
+            runbook_url: https://github.com/Tuananh165-art/NexusChat/blob/main/docs/devsecops-platform-plan.md
+        - alert: NexusChatPodCrashLooping
+          expr: increase(kube_pod_container_status_restarts_total{namespace=~"nexuschat-.*"}[15m]) > 3
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: NexusChat pod is restarting repeatedly
+        - alert: NexusChatServiceDown
+          expr: up{namespace=~"nexuschat-.*"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: A NexusChat scrape target is down

@@ -1,0 +1,31 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nexuschat-production
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: nexuschat
+  source:
+    repoURL: https://github.com/Tuananh165-art/NexusChat.git
+    targetRevision: v0.1.0
+    path: deployments/helm/nexuschat
+    helm:
+      releaseName: nexuschat
+      valueFiles:
+        - values.yaml
+      parameters:
+        - name: global.environment
+          value: production
+        - name: global.domain
+          value: nexuschat.example.com
+        - name: imageDefaults.tag
+          value: v0.1.0
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nexuschat-prod
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

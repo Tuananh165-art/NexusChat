@@ -1,203 +1,93 @@
 # NexusChat
 
 ![GitHub tag (latest SemVer)](https://img.shields.io/github/v/tag/Tuananh165-art/NexusChat?label=Version&sort=semver&style=flat-square)
-![CI](https://github.com/Tuananh165-art/NexusChat/actions/workflows/docker-api-dev.yml/badge.svg)
 
-<a href="#"><img src="docs/icons/go.svg" alt="Go" height="20"/></a> <a href="#"><img src="docs/icons/python.svg" alt="Python" height="20"/></a> <a href="#"><img src="docs/icons/nextjs.svg" alt="Next.js" height="20"/></a> <a href="#"><img src="docs/icons/kafka.svg" alt="Kafka" height="20"/></a> <a href="#"><img src="docs/icons/redis.svg" alt="Redis" height="20"/></a> <a href="#"><img src="docs/icons/cassandra.svg" alt="Cassandra" height="20"/></a> <a href="#"><img src="docs/icons/postgresql.svg" alt="PostgreSQL" height="20"/></a> <a href="#"><img src="docs/icons/traefik.svg" alt="Traefik" height="20"/></a> <a href="#"><img src="docs/icons/docker.svg" alt="Docker" height="20"/></a> <a href="#"><img src="docs/icons/prometheus.svg" alt="Prometheus" height="20"/></a> <a href="#"><img src="docs/icons/jaeger.svg" alt="Jaeger" height="20"/></a>
+<a href="#"><img src="docs/icons/go.svg" alt="Go" height="20"/></a> <a href="#"><img src="docs/icons/python.svg" alt="Python" height="20"/></a> <a href="#"><img src="docs/icons/nextjs.svg" alt="Next.js" height="20"/></a> <a href="#"><img src="docs/icons/kafka.svg" alt="Kafka" height="20"/></a> <a href="#"><img src="docs/icons/redis.svg" alt="Redis" height="20"/></a> <a href="#"><img src="docs/icons/cassandra.svg" alt="Cassandra" height="20"/></a> <a href="#"><img src="docs/icons/postgresql.svg" alt="PostgreSQL" height="20"/></a> <a href="#"><img src="docs/icons/docker.svg" alt="Docker" height="20"/></a> <a href="#"><img src="docs/icons/prometheus.svg" alt="Prometheus" height="20"/></a> <a href="#"><img src="docs/icons/jaeger.svg" alt="Jaeger" height="20"/></a>
 
-> Production-oriented real-time chat platform built as a microservices system -- Go backend, Next.js frontend, and an independent Python AI service.
+NexusChat is a production-oriented real-time chat platform built as a microservices system with Go services, a Next.js frontend, and an independent Python AI service. The repository includes local Docker Compose orchestration and a Kubernetes DevSecOps scaffold covering Helm, GitHub Actions, Nginx Ingress, Prometheus/Grafana, ELK, ArgoCD GitOps, Consul service mesh, and security admission controls.
 
----
+## What This Repository Contains
 
-## Problem
-
-Traditional chat systems often fail when they need to balance these requirements at the same time:
-
-- Low-latency WebSocket messaging
-- Scalable service boundaries
-- Reliable file upload and access control
-- Search, pin, reaction, typing, and delivery state
-- Room-level authorization
-- AI features that should not pollute the core chat domain
-
-When AI logic is placed inside the chat service, the service becomes harder to reason about, harder to test, and harder to scale independently.
-
-## Solution
-
-NexusChat keeps the chat platform split into focused services and adds AI as a separate service:
-
-- **Go services** handle chat, identity, matching, forwarding, and uploads
-- **Python AI service** handles provider abstraction, prompts, context, streaming, workflows, audit, and future MCP integration
-- The chat service only forwards AI requests and never owns AI business rules
-
-This keeps the chat runtime stable while AI capabilities evolve independently.
-
----
+| Area | Path | Purpose |
+| --- | --- | --- |
+| Go services | `cmd/`, `pkg/`, `internal/wire/` | Chat, user, match, forwarder, uploader, web server, shared infra |
+| Frontend | `frontend/` | Next.js chat client |
+| AI service | `ai-service/` | FastAPI AI microservice for assistant, workflow, agents, MCP preview, metrics |
+| Docker assets | `docker-compose.yaml`, `build/` | Local full-stack runtime and image builds |
+| Kubernetes app chart | `deployments/helm/nexuschat` | Helm chart for NexusChat stateless services |
+| GitOps apps | `deployments/gitops/applications` | ArgoCD application definitions |
+| Platform config | `deployments/platform` | Nginx, Prometheus/Grafana, ELK/ECK, Consul, Kyverno, ArgoCD values |
+| CI/CD | `.github/workflows/devsecops-platform.yml` | Test, scan, build, SBOM, sign, and Helm validation pipeline |
+| Docs | `docs/` | Architecture, AI plan, DevSecOps plan, implementation runbook, generated API docs |
 
 ## Architecture
 
 ### Runtime Services
 
-| Service | Lang | Protocol | Description |
-|---------|------|----------|-------------|
-| `web` | TypeScript | HTTP | Next.js frontend server |
-| `user` | Go | HTTP + gRPC | OAuth, profile, session lookup |
-| `match` | Go | HTTP | Random matching, wait-list, idempotency |
-| `chat` | Go | HTTP + gRPC | WebSocket messaging, channels, reactions, pins, search |
-| `forwarder` | Go | gRPC | Subscriber routing, session-to-channel mapping |
-| `uploader` | Go | HTTP | File upload, presigned S3 access control |
-| `ai-service` | Python | HTTP | AI rewrite, summary, translate, workflows, agents, MCP |
-
-### Boundary Rules
-
-- Transport handlers only parse and validate input
-- Services own business use cases
-- Repositories and clients own storage and network concerns
-- Other services are called only through explicit clients or APIs
-- AI-specific logic stays in `ai-service`
+| Service | Lang | Protocol | Responsibility |
+| --- | --- | --- | --- |
+| `web` | TypeScript/Go image | HTTP | Browser-facing Next.js app served by the web binary/image |
+| `user` | Go | HTTP + gRPC | OAuth, profile, auth cookies, session lookup |
+| `match` | Go | HTTP | Random matching workflow and channel creation trigger |
+| `chat` | Go | HTTP + gRPC + WebSocket | Channels, messages, roles, reactions, pins, search, AI request forwarding |
+| `forwarder` | Go | gRPC | Transient subscriber/session-to-channel routing |
+| `uploader` | Go | HTTP | Upload authorization and S3-compatible presigned access |
+| `ai-service` | Python | HTTP | AI rewrite, streaming, workflows, agents, MCP preview, audit/memory foundation |
 
 ### Data Ownership
 
 | Service | Owns |
-|---------|------|
-| `user` | User profile, session records |
-| `match` | Wait-list state, match results |
-| `chat` | Channel membership, message history, reactions, pinned messages, roles |
-| `forwarder` | Transient subscriber/session routing |
-| `uploader` | Upload authorization, object naming |
-| `ai-service` | AI requests, responses, workflows, audit logs, settings, memory |
+| --- | --- |
+| `user` | User profile and session records |
+| `match` | Wait-list state and match results |
+| `chat` | Channel membership, message history, reactions, pins, roles, message search |
+| `forwarder` | Transient subscriber and session routing |
+| `uploader` | Upload authorization, object naming, presigned URLs |
+| `ai-service` | AI requests, provider abstraction, workflow drafts, agent records, audit/memory state |
 
----
+### Dependency Rules
+
+- Transport handlers parse requests and responses only.
+- Service packages own use cases and domain decisions.
+- Repositories and clients own Redis, Cassandra, Kafka, S3, gRPC, and HTTP integration details.
+- Cross-service access goes through explicit APIs, gRPC clients, or events.
+- AI-specific logic stays in `ai-service`; `chat` only forwards AI requests for composer features.
 
 ## Tech Stack
 
 | Layer | Stack |
-|-------|-------|
-| <img src="docs/icons/go.svg" alt="Go" height="20"/> **Backend** | Go 1.24, gRPC, Protobuf, Wire DI, Cobra CLI |
-| <img src="docs/icons/python.svg" alt="Python" height="20"/> **AI Service** | Python 3.12+, FastAPI, Pydantic, SQLAlchemy, Alembic, httpx |
-| <img src="docs/icons/nextjs.svg" alt="Next.js" height="20"/> **Frontend** | Next.js 15, React 19, TypeScript |
-| <img src="docs/icons/kafka.svg" alt="Kafka" height="20"/> **Messaging** | Apache Kafka 7.6.0 (KRaft mode) |
-| <img src="docs/icons/redis.svg" alt="Redis" height="20"/> **Cache** | Redis Cluster 8.2.1 (6 nodes: 3 masters + 3 replicas) |
-| <img src="docs/icons/cassandra.svg" alt="Cassandra" height="20"/> **Chat Storage** | Apache Cassandra 4.0 |
-| <img src="docs/icons/postgresql.svg" alt="PostgreSQL" height="20"/> **AI Storage** | PostgreSQL 16 (Alpine) |
-| <img src="docs/icons/traefik.svg" alt="Traefik" height="20"/> **API Gateway** | Traefik v3.3 |
-| <img src="docs/icons/prometheus.svg" alt="Prometheus" height="20"/> **Metrics** | Prometheus v2.45.0 |
-| <img src="docs/icons/jaeger.svg" alt="Jaeger" height="20"/> **Tracing** | OpenTelemetry -> Jaeger (OTLP gRPC/HTTP) |
-| <img src="docs/icons/docker.svg" alt="Docker" height="20"/> **Containers** | Docker, Docker Compose v2 |
+| --- | --- |
+| Backend | Go 1.24, Cobra, Wire DI, gRPC, Protobuf, Gin-style HTTP packages |
+| Frontend | Next.js 15, React 19, TypeScript |
+| AI service | Python 3.12, FastAPI, Pydantic, SQLAlchemy, Alembic, httpx |
+| Messaging | Kafka 7.6.0 in local Docker Compose |
+| Cache | Redis Cluster 8.2.1 in local Docker Compose |
+| Chat storage | Cassandra 4.0 |
+| AI storage | PostgreSQL 16 |
+| Object storage | MinIO locally, S3-compatible storage in production |
+| Local gateway | Traefik v3.3 |
+| Production ingress | Nginx Ingress Controller |
+| Metrics | Prometheus, kube-prometheus-stack, Grafana |
+| Tracing | OpenTelemetry to Jaeger locally; OTLP collector recommended in production |
+| Logs | ELK through ECK/Filebeat scaffold |
+| GitOps | ArgoCD |
+| Service mesh | Consul Connect transparent proxy |
+| Security | Gitleaks, dependency review, CodeQL, Trivy, Syft SBOM, Cosign signing, Kyverno |
 
----
-
-## Features
-
-### Chat Platform
-
-- Real-time WebSocket chat
-- Channel authentication with JWT
-- User matching with idempotency
-- Message persistence and pagination
-- Reactions, pinning, editing, deleting, and seen state
-- Typing indicators and delivery status
-- Media uploads and presigned access control
-- Distributed rate limiting for file upload
-- Browser history persistence and reconnection behavior
-
-### AI Platform
-
-- Provider abstraction for any OpenAI-compatible endpoint
-- Context-aware rewrite, summary, translation, and workflow preview
-- SSE streaming foundation
-- Agent participant foundation
-- Workflow draft generation
-- Semantic memory and audit storage
-- MCP preview-only foundation
-- AI UI controls inside the chat composer
-
----
-
-## AI Service Design
-
-The AI layer is intentionally separate from the chat core.
-
-### Responsibilities inside `ai-service`
-
-- Prompt building
-- Context building
-- Provider communication
-- Streaming (SSE)
-- Agent execution
-- Workflow drafting
-- Audit logging
-- Semantic search
-- Memory
-- MCP registry and preview policy
-
-### Supported Provider Model
-
-`ai-service` is configured through environment variables and works with any OpenAI-compatible endpoint:
-
-- OpenAI
-- OpenRouter
-- LiteLLM
-- Ollama-compatible gateway
-- vLLM
-- Self-hosted AI gateway
-
-### AI Service API
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | Health check |
-| `GET` | `/ready` | Readiness check |
-| `GET` | `/metrics` | Prometheus metrics |
-| `POST` | `/v1/assistant/rewrite` | Rewrite text |
-| `POST` | `/v1/assistant/rewrite/stream` | Rewrite with SSE streaming |
-| `POST` | `/v1/workflows/draft` | Draft workflow |
-| `POST` | `/v1/agents` | Create agent |
-| `GET` | `/v1/agents` | List agents |
-| `GET` | `/v1/mcp/tools` | List MCP tools |
-| `POST` | `/v1/mcp/tools/preview` | Preview MCP tool |
-
----
-
-## Repository Layout
-
-```
-NexusChat/
-|-- cmd/                    # Cobra entry points for Go services
-|-- pkg/
-|   |-- chat/               # Chat service logic, HTTP, gRPC, repos, subscribers
-|   |-- user/               # User service logic
-|   |-- match/              # Matching workflow
-|   |-- forwarder/          # Subscriber routing
-|   |-- uploader/           # Upload service
-|   |-- web/                # Frontend server
-|   |-- common/             # Shared middleware, observability, auth, logging
-|   |-- infra/              # Redis, Kafka, Cassandra clients
-|   |-- config/             # Configuration structs
-|   |-- transport/          # Transport layer
-|-- internal/wire/          # Dependency injection wiring
-|-- frontend/               # Next.js chat client
-|-- ai-service/             # Standalone Python AI microservice
-|-- proto/                  # Protobuf contracts
-|-- build/                  # Dockerfiles
-|-- cassandra/              # CQL schema init scripts
-|-- prometheus/             # Prometheus config
-|-- docs/                   # Architecture notes and API docs
-```
-
----
-
-## Getting Started
+## Local Development
 
 ### Prerequisites
 
 - Docker Engine and Docker Compose v2
-- Google OAuth credentials for `user` service (for login)
-- An OpenAI-compatible AI endpoint (for AI features)
+- Go 1.24 for backend development
+- Node.js 20 for frontend development
+- Python 3.12 for AI service development
+- Google OAuth credentials for interactive login
+- OpenAI-compatible AI endpoint for AI features
 
-### 1. Configure Environment
+### Environment Files
 
-Root `.env` -- Go stack runtime variables:
+Root `.env`:
 
 ```env
 REDIS_PASSWORD=
@@ -211,7 +101,7 @@ USER_OAUTH_GOOGLE_CLIENTID=
 USER_OAUTH_GOOGLE_CLIENTSECRET=
 ```
 
-`ai-service/.env` -- AI-specific local dev settings:
+`ai-service/.env`:
 
 ```env
 AI_SERVICE_NAME=nexuschat-ai-service
@@ -229,40 +119,18 @@ CHAT_SERVICE_BASE_URL=http://localhost/api/chat
 OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
 ```
 
-### 2. Start the Full Stack
+Never commit real `.env` files, OAuth secrets, JWT secrets, database passwords, S3 credentials, or AI provider keys.
+
+### Start the Full Local Stack
 
 ```bash
 docker compose up --build -d
 ```
 
-This starts:
-
-| Component | Services |
-|-----------|----------|
-| Frontend | `web` |
-| Go Services | `user`, `match`, `random-chat`, `forwarder`, `uploader` |
-| AI | `ai-service` |
-| Cache | `redis-node-0` through `redis-node-5` (cluster) |
-| Queue | `kafka` |
-| Chat DB | `cassandra` + `cassandra-init` |
-| AI DB | `ai-postgres` |
-| Storage | `minio` + `createbucket` |
-| Gateway | `reverse-proxy` (Traefik) |
-| Metrics | `prometheus` |
-| Tracing | `jaeger` |
-
-### 3. Verify Services
-
-```bash
-docker compose ps
-docker compose logs -f ai-service
-docker compose logs -f random-chat
-```
-
-### 4. Open the App
+Local services:
 
 | URL | Service |
-|-----|---------|
+| --- | --- |
 | `http://localhost` | Web app |
 | `http://localhost:8080` | Traefik dashboard |
 | `http://localhost:9001` | MinIO console |
@@ -273,60 +141,20 @@ docker compose logs -f random-chat
 | `http://localhost/api/chat/swagger/index.html` | Chat API docs |
 | `http://localhost/api/uploader/swagger/index.html` | Uploader API docs |
 
----
-
-## How To Test AI In The UI
-
-The AI controls are inside the chat composer.
-
-### Rewrite Flow
-
-1. Open `http://localhost`
-2. Sign in and enter a chat room
-3. Type a draft message
-4. Click the `Sparkles` button next to the composer
-5. Choose one of:
-   - `Professional`
-   - `Friendly`
-   - `Shorter`
-6. The rewritten text replaces the draft in the input box
-7. Press send to publish it as a normal chat message
-
-### Workflow Preview Flow
-
-1. Type a draft message
-2. Click the `Sparkles` button
-3. Choose one of:
-   - `Tasks`
-   - `Notes`
-   - `Checklist`
-4. The AI preview appears above the composer
-5. Review it before doing anything else
-
-### Direct Backend Test
+Useful checks:
 
 ```bash
-curl -X POST http://localhost/api/chat/ai/rewrite \
-  -H "Authorization: Bearer <channel-token>" \
-  -H "Content-Type: application/json" \
-  -d '{"text":"xin chao toi muon viet lai cau nay","tone":"professional","locale":"Vietnamese"}'
+docker compose ps
+docker compose logs -f random-chat
+docker compose logs -f ai-service
 ```
-
-### Direct AI Service Test
-
-```bash
-curl -X POST http://localhost/api/ai/v1/assistant/rewrite \
-  -H "Content-Type: application/json" \
-  -d '{"text":"xin chao toi muon viet lai cau nay","tone":"professional","locale":"Vietnamese"}'
-```
-
----
 
 ## Development Commands
 
 ### Go Backend
 
 ```bash
+make test
 go test ./...
 go build ./...
 ```
@@ -334,6 +162,7 @@ go build ./...
 ### Frontend
 
 ```bash
+npm --prefix frontend ci
 npm --prefix frontend run build
 npm --prefix frontend run dev
 ```
@@ -342,44 +171,354 @@ npm --prefix frontend run dev
 
 ```bash
 cd ai-service
+python -m pip install -e ".[dev]"
 python -m pytest
 python -m ruff check .
 python -m uvicorn app.main:app --reload
 ```
 
----
+### Generated API Docs
 
-## Operational Notes
+Swagger files under `docs/user`, `docs/match`, `docs/chat`, and `docs/uploader` are generated. Use the existing Make target instead of hand editing:
 
-- `chat` remains the source of truth for chat persistence and WebSocket behavior
-- AI features are additive and do not replace the existing chat flow
-- AI requests are routed through the chat service only when the UI uses the chat composer AI action
-- AI database is separate from Cassandra to keep AI state isolated
-- AI provider keys should be rotated and never committed to version control
+```bash
+make doc
+```
 
----
+## DevSecOps Operating Model
 
-## Docs
+NexusChat uses two deployment modes:
 
+- Local development uses Docker Compose and Traefik.
+- Production-oriented delivery uses Kubernetes, Helm, GitHub Actions, ArgoCD, Nginx Ingress, Prometheus/Grafana, ELK, Consul mesh, and Kyverno.
+
+Detailed references:
+
+- [DevSecOps Platform Plan](docs/devsecops-platform-plan.md)
+- [DevSecOps Implementation Runbook](docs/devsecops-implementation-runbook.md)
+
+### Environment Model
+
+| Environment | Source | Namespace | Delivery |
+| --- | --- | --- | --- |
+| `dev` | Feature branches and PRs | Preview or ephemeral namespaces | CI validation only |
+| `staging` | `main` | `nexuschat-staging` | ArgoCD auto-sync |
+| `production` | Signed `v*` tags | `nexuschat-prod` | GitOps promotion with controlled sync |
+
+### Kubernetes and Helm
+
+Application chart:
+
+```text
+deployments/helm/nexuschat
+```
+
+The chart manages:
+
+- Deployments for `web`, `chat`, `match`, `user`, `uploader`, `forwarder`, and `ai-service`.
+- ClusterIP services and Nginx ingress routes.
+- Prometheus scrape annotations and `ServiceMonitor` resources.
+- Service accounts, pod/container security contexts, resource requests/limits.
+- HorizontalPodAutoscalers and PodDisruptionBudgets.
+- NetworkPolicy baseline.
+- Consul mesh annotations and `ServiceDefaults`.
+
+The chart intentionally does not deploy Kafka, Redis, Cassandra, MinIO, or Postgres. In production, deploy those through managed services or dedicated vendor charts and point NexusChat values to those endpoints.
+
+Important Helm values:
+
+| Value | Purpose |
+| --- | --- |
+| `global.imageRegistry` | Registry namespace for `api`, `web`, and `ai-service` images |
+| `imageDefaults.tag` | Default immutable image tag for the release |
+| `global.domain` | Ingress host |
+| `global.tlsSecretName` | TLS secret used by Nginx ingress |
+| `global.envFromSecrets` | Runtime secret references such as `nexuschat-runtime` |
+| `global.commonEnv` | Shared Kafka, Redis, Cassandra, OTLP, and metrics settings |
+| `services.*.env` | Service-specific environment variables |
+| `serviceMonitor.enabled` | Prometheus Operator scrape integration |
+| `networkPolicy.enabled` | Kubernetes network policy baseline |
+
+Local render command when Helm is installed:
+
+```bash
+helm lint deployments/helm/nexuschat
+helm template nexuschat deployments/helm/nexuschat --namespace nexuschat-staging
+```
+
+### GitHub Actions CI/CD
+
+Primary workflow:
+
+```text
+.github/workflows/devsecops-platform.yml
+```
+
+Pull request gates:
+
+1. Go tests through `make test`.
+2. Frontend install, lint, and build.
+3. AI service install, Ruff lint, and pytest.
+4. Helm lint and Helm template render.
+5. Gitleaks secret scan.
+6. Dependency review for PRs.
+7. CodeQL analysis for Go, JavaScript/TypeScript, and Python.
+8. Trivy filesystem scan with SARIF upload.
+
+Push or release tag gates:
+
+1. Build `api`, `web`, and `ai-service` images.
+2. Push images to GHCR.
+3. Scan pushed images with Trivy.
+4. Generate SPDX JSON SBOM artifacts.
+5. Sign images with Cosign keyless signing through GitHub OIDC.
+
+Dependabot is configured in [.github/dependabot.yml](.github/dependabot.yml) for Go modules, npm, pip, Docker, and GitHub Actions.
+
+### Image Registry and Tags
+
+The DevSecOps workflow publishes images under:
+
+```text
+ghcr.io/tuananh165-art/nexuschat/api
+ghcr.io/tuananh165-art/nexuschat/web
+ghcr.io/tuananh165-art/nexuschat/ai-service
+```
+
+Tagging behavior:
+
+| Event | Image tag |
+| --- | --- |
+| Push to branch | Git SHA |
+| Push tag `v*` | Release tag, for example `v0.1.0` |
+| All pushed images | Also receive a `sha-*` metadata tag |
+
+Production should use immutable release tags or SHA tags, not mutable `latest`.
+
+### ArgoCD GitOps
+
+Application manifests:
+
+```text
+deployments/gitops/applications
+```
+
+| File | Purpose |
+| --- | --- |
+| `nexuschat-staging.yaml` | Creates the `nexuschat` ArgoCD project and staging app |
+| `nexuschat-production.yaml` | Production app pinned to a release tag |
+| `platform-apps.yaml` | Platform apps for Nginx, kube-prometheus-stack, Consul, ECK/ELK, Kyverno |
+
+Bootstrap order:
+
+```bash
+kubectl create namespace argocd
+helm repo add argo https://argoproj.github.io/argo-helm
+helm upgrade --install argocd argo/argo-cd \
+  --namespace argocd \
+  --values deployments/platform/argocd/values.yaml
+
+kubectl apply -f deployments/gitops/applications/platform-apps.yaml
+kubectl apply -f deployments/gitops/applications/nexuschat-staging.yaml
+```
+
+Apply production only after staging is healthy:
+
+```bash
+kubectl apply -f deployments/gitops/applications/nexuschat-production.yaml
+```
+
+Production changes should flow through Git commits and ArgoCD sync. Manual `kubectl apply` in production is reserved for emergency incident response and must be backfilled into Git.
+
+### Platform Components
+
+| Component | Path | Notes |
+| --- | --- | --- |
+| ArgoCD | `deployments/platform/argocd/values.yaml` | GitOps controller, ingress, HA settings |
+| Nginx Ingress | `deployments/platform/ingress-nginx/values.yaml` | Metrics, JSON access logs, safer snippet defaults |
+| Prometheus/Grafana | `deployments/platform/monitoring/kube-prometheus-stack-values.yaml` | Metrics, retention, Grafana persistence |
+| Alerts | `deployments/platform/monitoring/nexuschat-rules.yaml` | 5xx, crash loop, scrape-down alerts |
+| ELK/ECK | `deployments/platform/logging/eck-stack.yaml` | Elasticsearch, Kibana, Filebeat log shipping |
+| Consul | `deployments/platform/consul/values.yaml` | Connect injection, TLS, ACLs, transparent proxy |
+| Kyverno | `deployments/platform/security/kyverno-policies.yaml` | Non-root, no privilege escalation, resource requirements |
+
+### Secrets and Configuration
+
+Production secrets must be created outside Git. The Helm chart expects a secret named `nexuschat-runtime` in each application namespace through `global.envFromSecrets`.
+
+Required secret keys include:
+
+| Key | Used by |
+| --- | --- |
+| `CHAT_JWT_SECRET` | `chat` |
+| `REDIS_PASSWORD` | Go services |
+| `CASSANDRA_USER` | Go services |
+| `CASSANDRA_PASSWORD` | Go services |
+| `UPLOADER_S3_ACCESSKEY` | `uploader` |
+| `UPLOADER_S3_SECRETKEY` | `uploader` |
+| `USER_OAUTH_GOOGLE_CLIENTID` | `user` |
+| `USER_OAUTH_GOOGLE_CLIENTSECRET` | `user` |
+| `AI_POSTGRES_PASSWORD` | `ai-service` |
+| AI provider credentials | `ai-service` |
+
+Recommended production pattern:
+
+1. Store source secrets in a cloud secret manager.
+2. Install External Secrets Operator or a sealed-secrets workflow.
+3. Sync the Kubernetes secret `nexuschat-runtime`.
+4. Rotate secrets in the source secret manager.
+
+### Security Baseline
+
+Repository and build controls:
+
+- Branch protection on `main`.
+- Required PR reviews for application and DevSecOps-owned changes.
+- Gitleaks for secret scanning.
+- Dependency review for pull requests.
+- CodeQL for Go, TypeScript, and Python.
+- Trivy filesystem and image scans.
+- SBOM artifacts generated for pushed images.
+- Cosign keyless image signing through GitHub OIDC.
+
+Runtime controls:
+
+- Pods run as non-root.
+- Containers drop Linux capabilities and disable privilege escalation.
+- Read-only root filesystem is enabled in the application chart.
+- Resource requests and limits are required.
+- NetworkPolicy restricts ingress and egress to expected ports.
+- Nginx ingress terminates TLS.
+- Consul mesh provides service identity and internal traffic controls.
+- Kyverno starts in audit mode and can be moved to enforce mode after clean releases.
+
+### Observability
+
+Metrics:
+
+- Go services expose Prometheus metrics on port `8080`.
+- `ai-service` exposes `/metrics` on port `8090`.
+- `ServiceMonitor` resources are generated by the Helm chart when enabled.
+- Nginx ingress and Consul metrics are enabled in platform values.
+
+Logging:
+
+- ECK-managed Elasticsearch and Kibana are scaffolded under `deployments/platform/logging`.
+- Filebeat ships Kubernetes container logs.
+- Create Kibana data views for `filebeat-*`.
+
+Tracing:
+
+- Local Docker Compose routes OpenTelemetry traces to Jaeger.
+- Production should route OTLP to an OpenTelemetry Collector before long-term storage.
+
+Alerts:
+
+- High HTTP 5xx rate.
+- Pod crash loops.
+- Prometheus scrape target down.
+- Add dependency-specific alerts for Kafka lag, Cassandra failures, Redis errors, AI provider failures, and upload storage errors before production cutover.
+
+### Release Promotion
+
+Standard release flow:
+
+1. Merge to `main`.
+2. Confirm CI, scans, SBOM, signing, and Helm validation pass.
+3. Confirm staging ArgoCD sync is healthy.
+4. Run staging smoke tests against the staging ingress domain.
+5. Create a signed release tag:
+
+```bash
+git tag -s v0.1.0 -m "NexusChat v0.1.0"
+git push origin v0.1.0
+```
+
+6. Update `deployments/gitops/applications/nexuschat-production.yaml` to the release tag and image tag.
+7. Merge the promotion change.
+8. Sync or approve production in ArgoCD.
+9. Verify ingress, app health, metrics, logs, and error rate.
+
+### Rollback
+
+ArgoCD rollback:
+
+```bash
+argocd app history nexuschat-production
+argocd app rollback nexuschat-production <revision-id>
+```
+
+GitOps image rollback:
+
+1. Set `imageDefaults.tag` to the last known good immutable tag.
+2. Commit the GitOps change.
+3. Let ArgoCD sync production.
+4. Confirm metrics, logs, and user flows recover.
+
+## AI Service API
+
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| `GET` | `/health` | Health check |
+| `GET` | `/ready` | Readiness check |
+| `GET` | `/metrics` | Prometheus metrics |
+| `POST` | `/v1/assistant/rewrite` | Rewrite text |
+| `POST` | `/v1/assistant/rewrite/stream` | Rewrite with SSE streaming |
+| `POST` | `/v1/workflows/draft` | Draft workflow |
+| `POST` | `/v1/agents` | Create agent |
+| `GET` | `/v1/agents` | List agents |
+| `GET` | `/v1/mcp/tools` | List MCP tools |
+| `POST` | `/v1/mcp/tools/preview` | Preview MCP tool |
+
+## AI UI Flow
+
+The AI controls are inside the chat composer.
+
+Rewrite flow:
+
+1. Open `http://localhost`.
+2. Sign in and enter a chat room.
+3. Type a draft message.
+4. Click the `Sparkles` button next to the composer.
+5. Choose `Professional`, `Friendly`, or `Shorter`.
+6. Review the rewritten text and send it as a normal chat message.
+
+Workflow preview flow:
+
+1. Type a draft message.
+2. Click the `Sparkles` button.
+3. Choose `Tasks`, `Notes`, or `Checklist`.
+4. Review the AI preview above the composer.
+
+Direct AI service test:
+
+```bash
+curl -X POST http://localhost/api/ai/v1/assistant/rewrite \
+  -H "Content-Type: application/json" \
+  -d '{"text":"xin chao toi muon viet lai cau nay","tone":"professional","locale":"Vietnamese"}'
+```
+
+## Documentation
+
+- [Engineering Docs Index](docs/README.md)
 - [Architecture](docs/architecture.md)
 - [AI Service Plan](docs/ai-service-plan.md)
-- [Engineering Docs Index](docs/README.md)
-- [AI service README](ai-service/README.md)
+- [DevSecOps Platform Plan](docs/devsecops-platform-plan.md)
+- [DevSecOps Implementation Runbook](docs/devsecops-implementation-runbook.md)
+- [Clean Code And Design Patterns](docs/clean-code-design-patterns.md)
+- [AI Service README](ai-service/README.md)
 
----
+## Production Readiness Checklist
 
-## Docker Tagging Rules
-
-| Event | Ref | Docker Tags |
-|-------|-----|-------------|
-| `pull_request` | `refs/pull/2/merge` | `pr-2` |
-| `push` | `refs/heads/master` | `master` |
-| `push` | `refs/heads/releases/v1` | `releases-v1` |
-| `push tag` | `refs/tags/v1.2.3` | `v1.2.3`, `latest` |
-| `push tag` | `refs/tags/v2.0.8-beta.67` | `v2.0.8-beta.67`, `latest` |
-
----
+- CI passes all test, scan, SBOM, signing, and Helm validation jobs.
+- Images are immutable, signed, scanned, and promoted through GitOps.
+- Runtime secrets are injected from approved secret storage, not committed.
+- Nginx ingress TLS and DNS are configured for the target environment.
+- Prometheus targets, Grafana dashboards, alerts, Kibana indexes, and Consul services are healthy.
+- NetworkPolicy and Kyverno policies are reviewed before enforce mode.
+- Staging smoke tests pass before production sync.
+- Rollback target and previous image tags are known before deployment.
 
 <p align="center">
-  <sub>Built with Go | Python | Next.js | Kafka | Redis | Cassandra | PostgreSQL | MinIO | Traefik</sub>
+  <sub>Built with Go | Python | Next.js | Kafka | Redis | Cassandra | PostgreSQL | MinIO | Kubernetes | Helm | ArgoCD | Nginx | Prometheus | Grafana | ELK | Consul</sub>
 </p>

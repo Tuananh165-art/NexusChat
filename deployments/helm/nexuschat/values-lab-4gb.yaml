@@ -1,0 +1,144 @@
+# Minimal lab values for a 4 GB RAM / 50 GB disk server.
+# This profile is for demo/dev only, not production.
+
+global:
+  environment: lab
+  # Leave domain and tlsSecretName empty to access the lab by server IP.
+  # Example: http://<server-ip>
+  domain: ""
+  tlsSecretName: ""
+  podAnnotations: {}
+  commonEnv:
+    KAFKA_ADDRS: kafka.kafka.svc.cluster.local:9092
+    KAFKA_VERSION: "3.6.0"
+    REDIS_ADDRS: redis-master.redis.svc.cluster.local:6379
+    REDIS_EXPIRATIONHOUR: "24"
+    CASSANDRA_HOSTS: cassandra.cassandra.svc.cluster.local
+    CASSANDRA_PORT: "9042"
+    CASSANDRA_KEYSPACE: NexusChat
+    OBSERVABILITY_PROMETHEUS_PORT: ""
+    OBSERVABILITY_TRACING_OTLPENDPOINT: ""
+
+imageDefaults:
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "32m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "180"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+
+serviceMonitor:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+
+consul:
+  serviceDefaults:
+    enabled: false
+
+services:
+  web:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 192Mi
+    autoscaling:
+      enabled: false
+
+  chat:
+    replicas: 1
+    env:
+      CHAT_HTTP_SERVER_MAXCONN: "50"
+      CHAT_MESSAGE_MAXNUM: "500"
+      CHAT_MESSAGE_PAGINATIONNUM: "100"
+      CHAT_MESSAGE_MAXSIZEBYTE: "2048"
+      AI_BASEURL: http://ai-service:8090
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 384Mi
+    autoscaling:
+      enabled: false
+
+  match:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 192Mi
+    autoscaling:
+      enabled: false
+
+  user:
+    replicas: 1
+    env:
+      USER_AUTH_COOKIE_DOMAIN: ""
+      USER_OAUTH_COOKIE_DOMAIN: ""
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 192Mi
+    autoscaling:
+      enabled: false
+
+  uploader:
+    replicas: 1
+    env:
+      UPLOADER_HTTP_SERVER_MAXBODYBYTE: "10485760"
+      UPLOADER_HTTP_SERVER_MAXMEMORYBYTE: "4194304"
+      UPLOADER_S3_ENDPOINT: http://minio.minio.svc.cluster.local:9000
+      UPLOADER_S3_PUBLICENDPOINT: ""
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 192Mi
+    autoscaling:
+      enabled: false
+
+  forwarder:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 25m
+        memory: 64Mi
+      limits:
+        cpu: 250m
+        memory: 192Mi
+    autoscaling:
+      enabled: false
+
+  ai-service:
+    replicas: 1
+    env:
+      AI_ENVIRONMENT: lab
+      REDIS_URL: redis://redis-master.redis.svc.cluster.local:6379/0
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 384Mi
+    autoscaling:
+      enabled: false

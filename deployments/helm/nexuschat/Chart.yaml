@@ -1,0 +1,12 @@
+apiVersion: v2
+name: nexuschat
+description: Helm chart for NexusChat application services
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - nexuschat
+  - chat
+  - devsecops
+maintainers:
+  - name: NexusChat Platform Team

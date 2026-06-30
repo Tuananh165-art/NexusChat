@@ -1,0 +1,250 @@
+global:
+  imageRegistry: ghcr.io/tuananh165-art/nexuschat
+  imagePullSecrets: []
+  environment: staging
+  domain: nexuschat.example.com
+  tlsSecretName: nexuschat-tls
+  commonEnv:
+    KAFKA_ADDRS: kafka.kafka.svc.cluster.local:9092
+    KAFKA_VERSION: "3.6.0"
+    REDIS_ADDRS: redis-master.redis.svc.cluster.local:6379
+    REDIS_EXPIRATIONHOUR: "24"
+    CASSANDRA_HOSTS: cassandra.cassandra.svc.cluster.local
+    CASSANDRA_PORT: "9042"
+    CASSANDRA_KEYSPACE: NexusChat
+    OBSERVABILITY_PROMETHEUS_PORT: "8080"
+    OBSERVABILITY_TRACING_OTLPENDPOINT: otel-collector.monitoring.svc.cluster.local:4318
+  envFromSecrets:
+    - nexuschat-runtime
+  podAnnotations:
+    consul.hashicorp.com/connect-inject: "true"
+    consul.hashicorp.com/transparent-proxy: "true"
+    consul.hashicorp.com/transparent-proxy-exclude-outbound-ports: "443"
+
+imageDefaults:
+  pullPolicy: IfNotPresent
+  tag: latest
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+
+serviceMonitor:
+  enabled: true
+  labels:
+    release: kube-prometheus-stack
+
+networkPolicy:
+  enabled: true
+
+consul:
+  serviceDefaults:
+    enabled: true
+
+services:
+  web:
+    enabled: true
+    image:
+      repository: web
+    command: []
+    replicas: 2
+    containerPort: 8081
+    metricsPort: 8080
+    path: /
+    env:
+      WEB_HTTP_SERVER_PORT: "8081"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 70
+
+  chat:
+    enabled: true
+    image:
+      repository: api
+    command: ["chat"]
+    replicas: 3
+    containerPort: 8081
+    grpcPort: 4000
+    metricsPort: 8080
+    path: /api/chat
+    env:
+      CHAT_HTTP_SERVER_PORT: "8081"
+      CHAT_HTTP_SERVER_MAXCONN: "200"
+      CHAT_HTTP_SERVER_SWAG: "false"
+      CHAT_GRPC_SERVER_PORT: "4000"
+      CHAT_GRPC_CLIENT_USER_ENDPOINT: user:4000
+      CHAT_GRPC_CLIENT_FORWARDER_ENDPOINT: forwarder:4000
+      CHAT_MESSAGE_MAXNUM: "5000"
+      CHAT_MESSAGE_PAGINATIONNUM: "5000"
+      CHAT_MESSAGE_MAXSIZEBYTE: "4096"
+      CHAT_JWT_EXPIRATIONSECOND: "86400"
+      AI_BASEURL: http://ai-service:8090
+      AI_REQUESTTIMEOUTMILLI: "30000"
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 768Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 65
+
+  match:
+    enabled: true
+    image:
+      repository: api
+    command: ["match"]
+    replicas: 2
+    containerPort: 8081
+    metricsPort: 8080
+    path: /api/match
+    env:
+      MATCH_HTTP_SERVER_PORT: "8081"
+      MATCH_HTTP_SERVER_MAXCONN: "200"
+      MATCH_HTTP_SERVER_SWAG: "false"
+      MATCH_GRPC_CLIENT_CHAT_ENDPOINT: chat:4000
+      MATCH_GRPC_CLIENT_USER_ENDPOINT: user:4000
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 700m
+        memory: 512Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 70
+
+  user:
+    enabled: true
+    image:
+      repository: api
+    command: ["user"]
+    replicas: 2
+    containerPort: 8081
+    grpcPort: 4000
+    metricsPort: 8080
+    path: /api/user
+    env:
+      USER_HTTP_SERVER_PORT: "8081"
+      USER_HTTP_SERVER_SWAG: "false"
+      USER_GRPC_SERVER_PORT: "4000"
+      USER_AUTH_COOKIE_DOMAIN: nexuschat.example.com
+      USER_OAUTH_COOKIE_DOMAIN: nexuschat.example.com
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 700m
+        memory: 512Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 70
+
+  uploader:
+    enabled: true
+    image:
+      repository: api
+    command: ["uploader"]
+    replicas: 2
+    containerPort: 8081
+    metricsPort: 8080
+    path: /api/uploader
+    env:
+      UPLOADER_HTTP_SERVER_PORT: "8081"
+      UPLOADER_HTTP_SERVER_SWAG: "false"
+      UPLOADER_HTTP_SERVER_MAXBODYBYTE: "67108864"
+      UPLOADER_HTTP_SERVER_MAXMEMORYBYTE: "16777216"
+      UPLOADER_S3_ENDPOINT: http://minio.minio.svc.cluster.local:9000
+      UPLOADER_S3_PUBLICENDPOINT: https://assets.nexuschat.example.com
+      UPLOADER_S3_REGION: us-east-1
+      UPLOADER_S3_BUCKET: myfilebucket
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 700m
+        memory: 512Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 70
+
+  forwarder:
+    enabled: true
+    image:
+      repository: api
+    command: ["forwarder"]
+    replicas: 2
+    containerPort: 4000
+    grpcPort: 4000
+    metricsPort: 8080
+    path: ""
+    env:
+      FORWARDER_GRPC_SERVER_PORT: "4000"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 700m
+        memory: 512Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 70
+
+  ai-service:
+    enabled: true
+    image:
+      repository: ai-service
+    command: []
+    replicas: 2
+    containerPort: 8090
+    metricsPort: 8090
+    path: /api/ai
+    healthPath: /health
+    readinessPath: /ready
+    env:
+      AI_HOST: 0.0.0.0
+      AI_PORT: "8090"
+      AI_ENVIRONMENT: staging
+      REDIS_URL: redis://redis-master.redis.svc.cluster.local:6379/0
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 6
+      targetCPUUtilizationPercentage: 70
