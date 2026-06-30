@@ -7,7 +7,7 @@ kind: ServiceDefaults
 metadata:
   name: {{ $name }}
 spec:
-  protocol: {{ ternary "grpc" "http" (and $svc.grpcPort (not $svc.path)) }}
+  protocol: {{ ternary "grpc" "http" (and (hasKey $svc "grpcPort") (not $svc.path)) }}
 {{- end }}
 {{- end }}
 {{- end }}
