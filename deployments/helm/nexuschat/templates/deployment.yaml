@@ -51,9 +51,11 @@ spec:
           ports:
             - name: http
               containerPort: {{ $svc.containerPort }}
+            {{- if and $svc.metricsPort (ne (toString $svc.metricsPort) (toString $svc.containerPort)) }}
             - name: metrics
               containerPort: {{ $svc.metricsPort }}
-            {{- if $svc.grpcPort }}
+            {{- end }}
+            {{- if and $svc.grpcPort (ne (toString $svc.grpcPort) (toString $svc.containerPort)) }}
             - name: grpc
               containerPort: {{ $svc.grpcPort }}
             {{- end }}

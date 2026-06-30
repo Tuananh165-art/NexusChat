@@ -16,10 +16,12 @@ spec:
     - name: http
       port: {{ $svc.containerPort }}
       targetPort: http
+    {{- if and $svc.metricsPort (ne (toString $svc.metricsPort) (toString $svc.containerPort)) }}
     - name: metrics
       port: {{ $svc.metricsPort }}
       targetPort: metrics
-    {{- if $svc.grpcPort }}
+    {{- end }}
+    {{- if and $svc.grpcPort (ne (toString $svc.grpcPort) (toString $svc.containerPort)) }}
     - name: grpc
       port: {{ $svc.grpcPort }}
       targetPort: grpc
