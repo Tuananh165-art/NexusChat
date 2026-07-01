@@ -58,6 +58,7 @@ type HttpServer struct {
 }
 
 func NewGinServer(name string, logger common.HttpLog, config *config.Config) *gin.Engine {
+	initJWT(config)
 	svr := gin.New()
 	svr.Use(gin.Recovery())
 	svr.Use(common.CorsMiddleware())
@@ -71,6 +72,11 @@ func NewGinServer(name string, logger common.HttpLog, config *config.Config) *gi
 	})
 	svr.Use(ginmiddleware.Handler("", mdlw))
 	return svr
+}
+
+func initJWT(config *config.Config) {
+	common.JwtSecret = config.Chat.JWT.Secret
+	common.JwtExpirationSecond = config.Chat.JWT.ExpirationSecond
 }
 
 func NewHttpServer(name string, logger common.HttpLog, config *config.Config, svr *gin.Engine, channelUploadRateLimiter ChannelUploadRateLimiter) *HttpServer {
