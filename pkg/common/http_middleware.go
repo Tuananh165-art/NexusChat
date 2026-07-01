@@ -100,7 +100,24 @@ func JWTAuth() gin.HandlerFunc {
 
 func JWTForwardAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		channelID, err := strconv.ParseUint(c.Request.Header.Get(ChannelIdHeader), 10, 64)
+		channelIDHeader := c.Request.Header.Get(ChannelIdHeader)
+		if channelIDHeader == "" {
+			accessToken := extractTokenFromHeader(c.Request)
+			if accessToken == "" {
+				c.AbortWithStatus(http.StatusUnauthorized)
+				return
+			}
+			authResult, err := Auth(&AuthPayload{AccessToken: accessToken})
+			if err != nil || authResult == nil || authResult.Expired {
+				c.AbortWithStatus(http.StatusUnauthorized)
+				return
+			}
+			c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ChannelKey, authResult.ChannelID))
+			c.Next()
+			return
+		}
+
+		channelID, err := strconv.ParseUint(channelIDHeader, 10, 64)
 		if err != nil {
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
