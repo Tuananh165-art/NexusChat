@@ -33,9 +33,9 @@ swag:
 
 docker: docker-api docker-web
 docker-api:
-	@docker build -f ./build/Dockerfile.api --build-arg VERSION=$(VERSION) -t Tuananh165-art/NexusChat-api:kafka .
+	@docker build -f ./build/Dockerfile.api --build-arg VERSION=$(VERSION) -t tuananh165/nexuschat-api:kafka .
 docker-web:
-	@docker build -f ./build/Dockerfile.web --build-arg VERSION=$(VERSION) -t Tuananh165-art/NexusChat-web:kafka .
+	@docker build -f ./build/Dockerfile.web --build-arg VERSION=$(VERSION) -t tuananh165/nexuschat-web:kafka .
 clean:
 	$(GOCLEAN)
 	rm -f server

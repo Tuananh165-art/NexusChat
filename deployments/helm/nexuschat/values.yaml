@@ -1,5 +1,5 @@
 global:
-  imageRegistry: ghcr.io/tuananh165-art/nexuschat
+  imageRegistry: docker.io/tuananh165
   imagePullSecrets: []
   environment: staging
   domain: nexuschat.example.com
@@ -34,6 +34,9 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
 
+traefik:
+  apiVersion: traefik.io/v1alpha1
+
 serviceMonitor:
   enabled: true
   labels:
@@ -50,7 +53,7 @@ services:
   web:
     enabled: true
     image:
-      repository: web
+      repository: nexuschat-web
     command: []
     replicas: 2
     containerPort: 8081
@@ -74,7 +77,7 @@ services:
   chat:
     enabled: true
     image:
-      repository: api
+      repository: nexuschat-api
     command: ["chat"]
     replicas: 3
     containerPort: 8081
@@ -110,7 +113,7 @@ services:
   match:
     enabled: true
     image:
-      repository: api
+      repository: nexuschat-api
     command: ["match"]
     replicas: 2
     containerPort: 8081
@@ -138,7 +141,7 @@ services:
   user:
     enabled: true
     image:
-      repository: api
+      repository: nexuschat-api
     command: ["user"]
     replicas: 2
     containerPort: 8081
@@ -167,7 +170,7 @@ services:
   uploader:
     enabled: true
     image:
-      repository: api
+      repository: nexuschat-api
     command: ["uploader"]
     replicas: 2
     containerPort: 8081
@@ -182,6 +185,14 @@ services:
       UPLOADER_S3_PUBLICENDPOINT: https://assets.nexuschat.example.com
       UPLOADER_S3_REGION: us-east-1
       UPLOADER_S3_BUCKET: myfilebucket
+    ingress:
+      className: traefik
+      traefikForwardAuth:
+        enabled: true
+        address: http://chat.nexuschat-prod.svc.cluster.local:8081/api/chat/forwardauth
+        trustForwardHeader: true
+        authResponseHeaders:
+          - X-Channel-Id
     resources:
       requests:
         cpu: 100m
@@ -198,7 +209,7 @@ services:
   forwarder:
     enabled: true
     image:
-      repository: api
+      repository: nexuschat-api
     command: ["forwarder"]
     replicas: 2
     containerPort: 4000
@@ -223,7 +234,7 @@ services:
   ai-service:
     enabled: true
     image:
-      repository: ai-service
+      repository: nexuschat-ai-service
     command: []
     replicas: 2
     containerPort: 8090

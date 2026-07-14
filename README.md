@@ -268,7 +268,7 @@ Pull request gates:
 Push or release tag gates:
 
 1. Build `api`, `web`, and `ai-service` images.
-2. Push images to GHCR.
+2. Push images to Docker Hub.
 3. Scan pushed images with Trivy.
 4. Generate SPDX JSON SBOM artifacts.
 5. Sign images with Cosign keyless signing through GitHub OIDC.
@@ -280,9 +280,9 @@ Dependabot is configured in [.github/dependabot.yml](.github/dependabot.yml) for
 The DevSecOps workflow publishes images under:
 
 ```text
-ghcr.io/tuananh165-art/nexuschat/api
-ghcr.io/tuananh165-art/nexuschat/web
-ghcr.io/tuananh165-art/nexuschat/ai-service
+docker.io/tuananh165/nexuschat-api
+docker.io/tuananh165/nexuschat-web
+docker.io/tuananh165/nexuschat-ai-service
 ```
 
 Tagging behavior:
@@ -294,6 +294,8 @@ Tagging behavior:
 | All pushed images | Also receive a `sha-*` metadata tag |
 
 Production should use immutable release tags or SHA tags, not mutable `latest`.
+
+Docker image references must be lowercase, so the Docker Hub namespace is configured as `tuananh165/*` in manifests and workflows.
 
 ### ArgoCD GitOps
 

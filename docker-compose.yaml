@@ -19,7 +19,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
   web:
-    image: Tuananh165-art/random-chat-web:kafka
+    image: tuananh165/nexuschat-web:kafka
     build:
       context: .
       dockerfile: ./build/Dockerfile.web
@@ -59,7 +59,7 @@ services:
       - ai-postgres
       - redis-node-0
   random-chat:
-    image: Tuananh165-art/random-chat-api:kafka
+    image: tuananh165/nexuschat-api:kafka
     build:
       context: .
       dockerfile: ./build/Dockerfile.api
@@ -110,7 +110,7 @@ services:
       - kafka
       - ai-service
   forwarder:
-    image: Tuananh165-art/random-chat-api:kafka
+    image: tuananh165/nexuschat-api:kafka
     build:
       context: .
       dockerfile: ./build/Dockerfile.api
@@ -138,7 +138,7 @@ services:
     depends_on:
       - kafka
   match:
-    image: Tuananh165-art/random-chat-api:kafka
+    image: tuananh165/nexuschat-api:kafka
     build:
       context: .
       dockerfile: ./build/Dockerfile.api
@@ -167,7 +167,7 @@ services:
       - "traefik.http.routers.match.service=match"
       - "traefik.http.services.match.loadbalancer.server.port=80"
   uploader:
-    image: Tuananh165-art/random-chat-api:kafka
+    image: tuananh165/nexuschat-api:kafka
     build:
       context: .
       dockerfile: ./build/Dockerfile.api
@@ -207,7 +207,7 @@ services:
       - "traefik.http.routers.uploader-swagger.service=uploader-swagger"
       - "traefik.http.services.uploader-swagger.loadbalancer.server.port=80"
   user:
-    image: Tuananh165-art/random-chat-api:kafka
+    image: tuananh165/nexuschat-api:kafka
     build:
       context: .
       dockerfile: ./build/Dockerfile.api

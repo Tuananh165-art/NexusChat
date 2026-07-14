@@ -1,0 +1,2 @@
+FROM docker.io/tuananh165/nexuschat-web:bbe996f5acd2c29302c0558a3459c06bfc2113a2
+COPY frontend/out /app/frontend/out

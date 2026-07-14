@@ -43,6 +43,8 @@ consul:
 
 services:
   web:
+    image:
+      fullname: docker.io/tuananh165/nexuschat-web:proxy-upload-v2
     replicas: 1
     resources:
       requests:
@@ -55,6 +57,8 @@ services:
       enabled: false
 
   chat:
+    image:
+      fullname: docker.io/tuananh165/nexuschat-api:90d41a588e4d2fb2876e9afaab759717dfa9e801
     replicas: 1
     env:
       CHAT_HTTP_SERVER_MAXCONN: "50"
@@ -73,6 +77,8 @@ services:
       enabled: false
 
   match:
+    image:
+      fullname: docker.io/tuananh165/nexuschat-api:90d41a588e4d2fb2876e9afaab759717dfa9e801
     replicas: 1
     resources:
       requests:
@@ -85,10 +91,12 @@ services:
       enabled: false
 
   user:
+    image:
+      fullname: docker.io/tuananh165/nexuschat-api:90d41a588e4d2fb2876e9afaab759717dfa9e801
     replicas: 1
     env:
-      USER_AUTH_COOKIE_DOMAIN: ""
-      USER_OAUTH_COOKIE_DOMAIN: ""
+      USER_AUTH_COOKIE_DOMAIN: nexuschat.click
+      USER_OAUTH_COOKIE_DOMAIN: nexuschat.click
     resources:
       requests:
         cpu: 25m
@@ -100,12 +108,18 @@ services:
       enabled: false
 
   uploader:
+    image:
+      fullname: docker.io/tuananh165/nexuschat-api:proxy-upload
     replicas: 1
+    ingress:
+      className: nginx
+      traefikForwardAuth:
+        enabled: false
     env:
       UPLOADER_HTTP_SERVER_MAXBODYBYTE: "10485760"
       UPLOADER_HTTP_SERVER_MAXMEMORYBYTE: "4194304"
       UPLOADER_S3_ENDPOINT: http://minio.minio.svc.cluster.local:9000
-      UPLOADER_S3_PUBLICENDPOINT: ""
+      UPLOADER_S3_PUBLICENDPOINT: http://minio-api.192.168.109.131.nip.io
     resources:
       requests:
         cpu: 25m
@@ -117,6 +131,8 @@ services:
       enabled: false
 
   forwarder:
+    image:
+      fullname: docker.io/tuananh165/nexuschat-api:90d41a588e4d2fb2876e9afaab759717dfa9e801
     replicas: 1
     resources:
       requests:
@@ -129,6 +145,8 @@ services:
       enabled: false
 
   ai-service:
+    image:
+      fullname: docker.io/tuananh165/nexuschat-ai-service:bbe996f5acd2c29302c0558a3459c06bfc2113a2
     replicas: 1
     command:
       - sh

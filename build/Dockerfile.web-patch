@@ -1,0 +1,2 @@
+FROM docker.io/tuananh165/nexuschat-web:proxy-upload
+COPY server-web-patched /app/server

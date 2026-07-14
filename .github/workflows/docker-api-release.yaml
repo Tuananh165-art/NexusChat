@@ -23,7 +23,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v3
         with:
-          images: Tuananh165-art/random-chat-api
+          images: tuananh165/nexuschat-api
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v2
