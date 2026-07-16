@@ -224,11 +224,6 @@ GET  /v1/agent-runs/{run_id}
 GET  /v1/agent-runs/{run_id}/stream
 POST /v1/agent-runs/{run_id}/cancel
 POST /v1/agent-runs/{run_id}/retry
-
-POST /v1/workflows/draft
-GET  /v1/workflows/{workflow_id}
-POST /v1/workflows/{workflow_id}/approve
-POST /v1/workflows/{workflow_id}/reject
 ```
 
 ## 10. Streaming Design
@@ -316,11 +311,11 @@ Phase 7: Agent participant
 - Add mention-trigger request schema.
 - Add retry, cancel, typing, and thinking states.
 
-Phase 8: Workflow engine
+Phase 8: Agent runtime
 
-- Add workflow draft endpoint.
-- Add meeting notes, task, action-item, and checklist schemas.
-- Add preview/approve/reject lifecycle.
+- Expand agent run orchestration.
+- Tighten MCP preview and execution safety.
+- Extend audit and semantic memory coverage.
 
 Phase 9: Semantic memory/search
 

@@ -160,27 +160,6 @@ export async function rewriteWithAI(text: string, tone: string, locale = "Vietna
   return res.json();
 }
 
-export type AIWorkflowType = "tasks" | "meeting_notes" | "action_items" | "checklist";
-
-export interface AIWorkflowDraft {
-  workflow_type: AIWorkflowType;
-  status: string;
-  preview: Record<string, unknown>;
-  execution_required_approval: boolean;
-}
-
-export async function draftWorkflowWithAI(
-  sourceText: string,
-  workflowType: AIWorkflowType
-): Promise<AIWorkflowDraft> {
-  const res = await fetch("/api/ai/v1/workflows/draft", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ source_text: sourceText, workflow_type: workflowType }),
-  });
-  if (res.status !== 200) throw new Error(res.statusText || "AI workflow failed");
-  return res.json();
-}
 
 export async function getPresignedUploadUrl(
   ext: string
@@ -218,6 +197,21 @@ export async function uploadFileToPresignedUrl(
   file: File
 ): Promise<void> {
   await fetch(url, { method: "PUT", body: file });
+}
+
+export async function uploadFileViaProxy(file: File): Promise<string> {
+  const ext = getFileExtension(file.name);
+  const formData = new FormData();
+  formData.append("file", file);
+  
+  const res = await fetch(`/api/uploader/upload/proxy?ext=${ext}`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: formData,
+  });
+  if (res.status !== 200) throw new Error(res.statusText);
+  const data = await res.json();
+  return data.object_key;
 }
 
 export interface ChunkUploadInit {
@@ -272,10 +266,10 @@ export async function chunkedUpload(
   const ext = getFileExtension(file.name);
   const totalParts = Math.ceil(file.size / CHUNK_SIZE);
   if (totalParts <= 1) {
-    const presigned = await getPresignedUploadUrl(ext);
-    await uploadFileToPresignedUrl(presigned.url, file);
+    // Use proxy upload to bypass presigned URL DNS issues
+    const objectKey = await uploadFileViaProxy(file);
     onProgress(100);
-    return presigned.object_key;
+    return objectKey;
   }
   const init = await initChunkUpload(ext, file.name, totalParts);
   try {

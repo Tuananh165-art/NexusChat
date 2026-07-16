@@ -24,7 +24,6 @@ import {
   Camera,
   Save,
   Sparkles,
-  ListChecks,
 } from "lucide-react";
 import {
   ACCESS_TOKEN_KEY,
@@ -39,6 +38,7 @@ import {
 } from "@/lib/constants";
 import type { Message, FilePayload, PinnedMessage } from "@/lib/constants";
 import {
+  deleteChannel,
   fetchUser,
   fetchChannelUsers,
   fetchChannelMessages,
@@ -52,14 +52,11 @@ import {
   fetchNotificationPrefs,
   setNotificationPrefs,
   rewriteWithAI,
-  draftWorkflowWithAI,
-  type AIWorkflowDraft,
-  type AIWorkflowType,
   getFileExtension,
   isImageExtension,
   mobileCheck,
 } from "@/lib/api";
-import { cacheMessages, getCachedMessages } from "@/lib/offline";
+import { cacheMessages, clearAll, getCachedMessages } from "@/lib/offline";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import ChatMessage from "@/components/ChatMessage";
 import ImageModal from "@/components/ImageModal";
@@ -112,7 +109,6 @@ export default function ChatPage() {
   const [showAIPanel, setShowAIPanel] = useState(false);
   const [isAIWorking, setIsAIWorking] = useState(false);
   const [aiError, setAIError] = useState("");
-  const [workflowDraft, setWorkflowDraft] = useState<AIWorkflowDraft | null>(null);
 
   const peerMapRef = useRef<Map<string, PeerInfo>>(new Map());
   const peerMessagesRef = useRef<Message[]>([]);
@@ -599,7 +595,6 @@ export default function ChatPage() {
       if (!text || isAIWorking) return;
       setIsAIWorking(true);
       setAIError("");
-      setWorkflowDraft(null);
       try {
         const result = await rewriteWithAI(text, tone);
         setDraftText(result.text);
@@ -611,25 +606,6 @@ export default function ChatPage() {
       }
     },
     [draftText, isAIWorking, saveDraft]
-  );
-
-  const handleWorkflowDraft = useCallback(
-    async (workflowType: AIWorkflowType) => {
-      const text = draftText.trim();
-      if (!text || isAIWorking) return;
-      setIsAIWorking(true);
-      setAIError("");
-      setWorkflowDraft(null);
-      try {
-        const result = await draftWorkflowWithAI(text, workflowType);
-        setWorkflowDraft(result);
-      } catch {
-        setAIError("AI workflow failed");
-      } finally {
-        setIsAIWorking(false);
-      }
-    },
-    [draftText, isAIWorking]
   );
 
   const handleFileUpload = useCallback(
@@ -715,10 +691,27 @@ export default function ChatPage() {
 
   const handleLeave = useCallback(async () => {
     if (!confirm("Are you sure you want to leave?")) return;
-    setConnectionStatus("disconnected");
-    ws.disconnect();
-    router.push("/");
-  }, [ws, router]);
+    try {
+      if (userIdRef.current) {
+        await deleteChannel(userIdRef.current);
+      }
+    } catch (err) {
+      console.error("Leave channel failed:", err);
+    } finally {
+      clearDraft();
+      try {
+        await clearAll();
+      } catch (err) {
+        console.error("Clear offline cache failed:", err);
+      }
+      localStorage.removeItem(ACCESS_TOKEN_KEY);
+      setAccessToken("");
+      accessTokenRef.current = "";
+      setConnectionStatus("disconnected");
+      ws.disconnect();
+      router.replace("/");
+    }
+  }, [clearDraft, router, ws]);
 
   const loadMoreMessages = useCallback(async () => {
     if (isLoadingMore || !hasMoreMessages) return;
@@ -1356,7 +1349,7 @@ export default function ChatPage() {
               </button>
             </div>
           )}
-          {(showAIPanel || aiError || workflowDraft) && (
+          {(showAIPanel || aiError) && (
             <div className="mb-2 rounded-xl bg-white/5 border border-white/10 p-2">
               {showAIPanel && (
                 <div className="flex items-center gap-2 overflow-x-auto pb-1">
@@ -1376,35 +1369,12 @@ export default function ChatPage() {
                       {item.label}
                     </button>
                   ))}
-                  {[
-                    { label: "Tasks", type: "tasks" as const },
-                    { label: "Notes", type: "meeting_notes" as const },
-                    { label: "Checklist", type: "checklist" as const },
-                  ].map((item) => (
-                    <button
-                      key={item.label}
-                      onClick={() => handleWorkflowDraft(item.type)}
-                      disabled={!draftText.trim() || isAIWorking}
-                      title={item.label}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-text-secondary hover:text-text-primary border border-white/10 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-xs whitespace-nowrap"
-                    >
-                      <ListChecks className="w-3.5 h-3.5 text-accent-violet" />
-                      {item.label}
-                    </button>
-                  ))}
                   {isAIWorking && <Loader2 className="w-4 h-4 text-accent-violet animate-spin flex-shrink-0" />}
                 </div>
               )}
               {aiError && (
                 <div className="mt-1 px-2 py-1 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
                   {aiError}
-                </div>
-              )}
-              {workflowDraft && (
-                <div className="mt-1 rounded-lg bg-black/20 border border-white/10 p-2 max-h-36 overflow-y-auto">
-                  <pre className="text-xs text-text-secondary whitespace-pre-wrap font-[Inter,sans-serif]">
-                    {JSON.stringify(workflowDraft.preview, null, 2)}
-                  </pre>
                 </div>
               )}
             </div>

@@ -2,7 +2,7 @@
 
 Independent Python AI microservice for NexusChat.
 
-This service owns AI-specific behavior: provider abstraction, prompt building, context building, agent execution, streaming, workflow drafting, audit logging, semantic memory, and future MCP integration.
+This service owns AI-specific behavior: provider abstraction, prompt building, context building, agent execution, streaming, audit logging, semantic memory, and future MCP integration.
 
 Existing Go chat services remain the source of truth for chat business logic.
 

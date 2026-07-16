@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.agents.service import AgentRegistry
-from app.api.routers import agents, assistant, health, mcp, metrics, workflow
+from app.api.routers import agents, assistant, health, mcp, metrics
 from app.config.settings import Settings, get_settings
 from app.mcp.registry import create_default_registry
 from app.observability.logging import configure_logging
@@ -35,6 +35,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(metrics.router)
     app.include_router(assistant.router)
     app.include_router(agents.router)
-    app.include_router(workflow.router)
     app.include_router(mcp.router)
     return app

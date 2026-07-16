@@ -466,7 +466,6 @@ GitOps image rollback:
 | `GET` | `/metrics` | Prometheus metrics |
 | `POST` | `/v1/assistant/rewrite` | Rewrite text |
 | `POST` | `/v1/assistant/rewrite/stream` | Rewrite with SSE streaming |
-| `POST` | `/v1/workflows/draft` | Draft workflow |
 | `POST` | `/v1/agents` | Create agent |
 | `GET` | `/v1/agents` | List agents |
 | `GET` | `/v1/mcp/tools` | List MCP tools |
@@ -484,13 +483,6 @@ Rewrite flow:
 4. Click the `Sparkles` button next to the composer.
 5. Choose `Professional`, `Friendly`, or `Shorter`.
 6. Review the rewritten text and send it as a normal chat message.
-
-Workflow preview flow:
-
-1. Type a draft message.
-2. Click the `Sparkles` button.
-3. Choose `Tasks`, `Notes`, or `Checklist`.
-4. Review the AI preview above the composer.
 
 Direct AI service test:
 
