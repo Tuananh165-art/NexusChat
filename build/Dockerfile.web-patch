@@ -1,2 +1,15 @@
+FROM golang:1.24 AS builder
+
+RUN mkdir -p /app
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+ARG VERSION
+RUN make dep
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-X github.com/Tuananh165-art/NexusChat/cmd.Version=$VERSION -w -s" -o server ./main.go
+
 FROM docker.io/tuananh165/nexuschat-web:proxy-upload
-COPY server-web-patched /app/server
+COPY --from=builder /app/server /app/server

@@ -358,6 +358,8 @@ jobs:
           context: .
           file: build/Dockerfile.web-patch
           push: true
+          build-args: |
+            VERSION=${{ steps.vars.outputs.tag }}
           tags: |
             docker.io/tuananh165/nexuschat-web:proxy-upload-v2
             docker.io/tuananh165/nexuschat-web:proxy-upload-v2-${{ steps.vars.outputs.tag }}
