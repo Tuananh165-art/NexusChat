@@ -3,6 +3,8 @@
 
 global:
   environment: lab
+  deploymentStrategy:
+    type: Recreate
   # Leave domain and tlsSecretName empty to access the lab by server IP.
   # Example: http://<server-ip>
   domain: ""
@@ -57,8 +59,6 @@ services:
       enabled: false
 
   chat:
-    image:
-      fullname: docker.io/tuananh165/nexuschat-api:90d41a588e4d2fb2876e9afaab759717dfa9e801
     replicas: 1
     env:
       CHAT_HTTP_SERVER_MAXCONN: "50"
@@ -77,8 +77,6 @@ services:
       enabled: false
 
   match:
-    image:
-      fullname: docker.io/tuananh165/nexuschat-api:90d41a588e4d2fb2876e9afaab759717dfa9e801
     replicas: 1
     resources:
       requests:
@@ -91,8 +89,6 @@ services:
       enabled: false
 
   user:
-    image:
-      fullname: docker.io/tuananh165/nexuschat-api:90d41a588e4d2fb2876e9afaab759717dfa9e801
     replicas: 1
     env:
       USER_AUTH_COOKIE_DOMAIN: nexuschat.click
@@ -131,8 +127,6 @@ services:
       enabled: false
 
   forwarder:
-    image:
-      fullname: docker.io/tuananh165/nexuschat-api:90d41a588e4d2fb2876e9afaab759717dfa9e801
     replicas: 1
     resources:
       requests:
@@ -145,13 +139,17 @@ services:
       enabled: false
 
   ai-service:
-    image:
-      fullname: docker.io/tuananh165/nexuschat-ai-service:bbe996f5acd2c29302c0558a3459c06bfc2113a2
     replicas: 1
+    ingress:
+      pathType: ImplementationSpecific
+      annotations:
+        nginx.ingress.kubernetes.io/use-regex: "true"
+        nginx.ingress.kubernetes.io/rewrite-target: /$2
     command:
       - sh
       - -c
       - python -m alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8090
+    path: /api/ai(/|$)(.*)
     env:
       AI_ENVIRONMENT: lab
       REDIS_URL: redis://redis-master.redis.svc.cluster.local:6379/0

@@ -418,23 +418,18 @@ jobs:
             --create-namespace \
             --values deployments/helm/nexuschat/values.yaml \
             --values deployments/helm/nexuschat/values-lab-4gb.yaml \
+            --set-string imageDefaults.tag="${TAG}" \
             --set-string services.web.image.fullname=docker.io/tuananh165/nexuschat-web:proxy-upload-v2-${TAG} \
-            --set-string services.chat.image.fullname=docker.io/tuananh165/nexuschat-api:${TAG} \
-            --set-string services.match.image.fullname=docker.io/tuananh165/nexuschat-api:${TAG} \
-            --set-string services.user.image.fullname=docker.io/tuananh165/nexuschat-api:${TAG} \
             --set-string services.uploader.image.fullname=docker.io/tuananh165/nexuschat-api:proxy-upload-${TAG} \
-            --set-string services.forwarder.image.fullname=docker.io/tuananh165/nexuschat-api:${TAG} \
-            --set-string services.ai-service.image.fullname=docker.io/tuananh165/nexuschat-ai-service:${TAG}
+            --timeout 10m \
+            --wait
 
       - name: Wait for deployments
         run: |
-          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/web --timeout=600s
-          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/chat --timeout=600s
-          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/match --timeout=600s
-          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/user --timeout=600s
-          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/uploader --timeout=600s
-          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/forwarder --timeout=600s
-          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/ai-service --timeout=600s
+          for deploy in web chat match user uploader forwarder ai-service; do
+            echo "Waiting for rollout: $deploy"
+            kubectl -n "$KUBE_NAMESPACE" rollout status deployment/$deploy --timeout=600s
+          done
 
       - name: Show deployed images
         run: |

@@ -1,0 +1,182 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-cassandra-0
+  namespace: cassandra
+  labels:
+    app: cassandra
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 8Gi
+  storageClassName: local-path
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cassandra
+  namespace: cassandra
+  labels:
+    app: cassandra
+spec:
+  type: ClusterIP
+  selector:
+    app: cassandra
+  ports:
+    - name: cql
+      port: 9042
+      targetPort: 9042
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nexuschat-cassandra-schema
+  namespace: cassandra
+data:
+  init.cql: |
+    CREATE KEYSPACE IF NOT EXISTS "NexusChat"
+    WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}
+    AND durable_writes = true;
+
+    USE "NexusChat";
+
+    CREATE TABLE IF NOT EXISTS channels (
+        id bigint,
+        user_id bigint,
+        PRIMARY KEY (id, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS messages (
+        id bigint,
+        event int,
+        channel_id bigint,
+        user_id bigint,
+        payload text,
+        seen boolean,
+        timestamp timestamp,
+        edited_at timestamp,
+        deleted_for_all boolean,
+        deleted_by bigint,
+        parent_id bigint,
+        PRIMARY KEY (channel_id, id)
+    ) WITH CLUSTERING ORDER BY (id DESC);
+
+    CREATE TABLE IF NOT EXISTS chanmsg_counters (
+        channel_id bigint PRIMARY KEY,
+        msgnum counter
+    );
+
+    CREATE TABLE IF NOT EXISTS message_reactions (
+        channel_id bigint,
+        message_id bigint,
+        emoji text,
+        user_id bigint,
+        created_at timestamp,
+        PRIMARY KEY ((channel_id, message_id), emoji, user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS pinned_messages (
+        channel_id bigint,
+        pinned_at timeuuid,
+        message_id bigint,
+        pinned_by bigint,
+        PRIMARY KEY (channel_id, pinned_at)
+    ) WITH CLUSTERING ORDER BY (pinned_at DESC);
+
+    CREATE TABLE IF NOT EXISTS channel_roles (
+        channel_id bigint,
+        user_id bigint,
+        role text,
+        assigned_at timestamp,
+        PRIMARY KEY (channel_id, user_id)
+    );
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cassandra
+  namespace: cassandra
+  labels:
+    app: cassandra
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cassandra
+  template:
+    metadata:
+      labels:
+        app: cassandra
+    spec:
+      tolerations:
+        - key: node.kubernetes.io/disk-pressure
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: cassandra
+          image: cassandra:4.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9042
+              name: cql
+          env:
+            - name: CASSANDRA_CLUSTER_NAME
+              value: NexusChat
+            - name: CASSANDRA_ENDPOINT_SNITCH
+              value: SimpleSnitch
+            - name: MAX_HEAP_SIZE
+              value: 512M
+            - name: HEAP_NEWSIZE
+              value: 128M
+            - name: CASSANDRA_BOOTSTRAP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: cassandra-bootstrap-auth
+                  key: username
+                  optional: true
+            - name: CASSANDRA_BOOTSTRAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cassandra-bootstrap-auth
+                  key: password
+                  optional: true
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/bash
+                  - -lc
+                  - |
+                    set -eu
+                    auth_args=""
+                    if [ -n "${CASSANDRA_BOOTSTRAP_USERNAME:-}" ] && [ -n "${CASSANDRA_BOOTSTRAP_PASSWORD:-}" ]; then
+                      auth_args="-u ${CASSANDRA_BOOTSTRAP_USERNAME} -p ${CASSANDRA_BOOTSTRAP_PASSWORD}"
+                    fi
+                    until /opt/cassandra/bin/cqlsh 127.0.0.1 9042 ${auth_args} -e 'DESCRIBE KEYSPACES' >/tmp/cassandra-keyspaces.txt 2>&1; do
+                      sleep 5
+                    done
+                    /opt/cassandra/bin/cqlsh 127.0.0.1 9042 ${auth_args} -f /schema/init.cql
+          resources:
+            requests:
+              cpu: 100m
+              memory: 768Mi
+            limits:
+              cpu: 700m
+              memory: 1200Mi
+          volumeMounts:
+            - name: cassandra-data
+              mountPath: /var/lib/cassandra
+            - name: schema
+              mountPath: /schema
+              readOnly: true
+      volumes:
+        - name: cassandra-data
+          persistentVolumeClaim:
+            claimName: data-cassandra-0
+        - name: schema
+          configMap:
+            name: nexuschat-cassandra-schema
