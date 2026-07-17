@@ -372,7 +372,7 @@ jobs:
       - build-images
       - build-proxy-variants
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, k3s-lab]
     env:
       KUBE_NAMESPACE: nexuschat-lab
     steps:
@@ -389,18 +389,23 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v4
 
-      - name: Write kubeconfig
+      - name: Write kubeconfig from secret when provided
         env:
           KUBECONFIG_B64: ${{ secrets.KUBE_CONFIG_B64 }}
         run: |
-          test -n "$KUBECONFIG_B64"
-          mkdir -p "$HOME/.kube"
-          echo "$KUBECONFIG_B64" | base64 -d > "$HOME/.kube/config"
-          chmod 600 "$HOME/.kube/config"
+          if [[ -n "$KUBECONFIG_B64" ]]; then
+            mkdir -p "$HOME/.kube"
+            echo "$KUBECONFIG_B64" | base64 -d > "$HOME/.kube/config"
+            chmod 600 "$HOME/.kube/config"
+          else
+            echo "KUBE_CONFIG_B64 is empty; using runner's existing kubeconfig"
+          fi
 
       - name: Verify cluster access
         run: |
           kubectl version --client
+          kubectl config current-context
+          kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}{"\n"}'
           kubectl get nodes -o wide
           kubectl create namespace "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
