@@ -141,15 +141,11 @@ services:
   ai-service:
     replicas: 1
     ingress:
-      pathType: ImplementationSpecific
-      annotations:
-        nginx.ingress.kubernetes.io/use-regex: "true"
-        nginx.ingress.kubernetes.io/rewrite-target: /$2
+      enabled: false
     command:
       - sh
       - -c
       - python -m alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8090
-    path: /api/ai(/|$)(.*)
     env:
       AI_ENVIRONMENT: lab
       REDIS_URL: redis://redis-master.redis.svc.cluster.local:6379/0
