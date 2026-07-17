@@ -365,3 +365,72 @@ jobs:
             docker.io/tuananh165/nexuschat-web:proxy-upload-v2-${{ steps.vars.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy-lab-k8s:
+    name: Deploy to K8s Lab
+    needs:
+      - build-images
+      - build-proxy-variants
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      KUBE_NAMESPACE: nexuschat-lab
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set deploy tag
+        id: vars
+        run: echo "tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Write kubeconfig
+        env:
+          KUBECONFIG_B64: ${{ secrets.KUBE_CONFIG_B64 }}
+        run: |
+          test -n "$KUBECONFIG_B64"
+          mkdir -p "$HOME/.kube"
+          echo "$KUBECONFIG_B64" | base64 -d > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+
+      - name: Verify cluster access
+        run: |
+          kubectl version --client
+          kubectl get nodes -o wide
+          kubectl create namespace "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Helm upgrade lab release
+        env:
+          TAG: ${{ steps.vars.outputs.tag }}
+        run: |
+          helm upgrade --install nexuschat deployments/helm/nexuschat \
+            --namespace "$KUBE_NAMESPACE" \
+            --create-namespace \
+            --values deployments/helm/nexuschat/values.yaml \
+            --values deployments/helm/nexuschat/values-lab-4gb.yaml \
+            --set-string services.web.image.fullname=docker.io/tuananh165/nexuschat-web:proxy-upload-v2-${TAG} \
+            --set-string services.chat.image.fullname=docker.io/tuananh165/nexuschat-api:${TAG} \
+            --set-string services.match.image.fullname=docker.io/tuananh165/nexuschat-api:${TAG} \
+            --set-string services.user.image.fullname=docker.io/tuananh165/nexuschat-api:${TAG} \
+            --set-string services.uploader.image.fullname=docker.io/tuananh165/nexuschat-api:proxy-upload-${TAG} \
+            --set-string services.forwarder.image.fullname=docker.io/tuananh165/nexuschat-api:${TAG} \
+            --set-string services.ai-service.image.fullname=docker.io/tuananh165/nexuschat-ai-service:${TAG}
+
+      - name: Wait for deployments
+        run: |
+          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/web --timeout=600s
+          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/chat --timeout=600s
+          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/match --timeout=600s
+          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/user --timeout=600s
+          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/uploader --timeout=600s
+          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/forwarder --timeout=600s
+          kubectl -n "$KUBE_NAMESPACE" rollout status deployment/ai-service --timeout=600s
+
+      - name: Show deployed images
+        run: |
+          kubectl -n "$KUBE_NAMESPACE" get deploy -o jsonpath='{range .items[*]}{.metadata.name}{" => "}{range .spec.template.spec.containers[*]}{.image}{" "}{end}{"\n"}{end}'
