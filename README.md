@@ -4,11 +4,11 @@
 
 <a href="#"><img src="docs/icons/go.svg" alt="Go" height="20"/></a> <a href="#"><img src="docs/icons/python.svg" alt="Python" height="20"/></a> <a href="#"><img src="docs/icons/nextjs.svg" alt="Next.js" height="20"/></a> <a href="#"><img src="docs/icons/kafka.svg" alt="Kafka" height="20"/></a> <a href="#"><img src="docs/icons/redis.svg" alt="Redis" height="20"/></a> <a href="#"><img src="docs/icons/cassandra.svg" alt="Cassandra" height="20"/></a> <a href="#"><img src="docs/icons/postgresql.svg" alt="PostgreSQL" height="20"/></a> <a href="#"><img src="docs/icons/docker.svg" alt="Docker" height="20"/></a> <a href="#"><img src="docs/icons/prometheus.svg" alt="Prometheus" height="20"/></a> <a href="#"><img src="docs/icons/jaeger.svg" alt="Jaeger" height="20"/></a>
 
-NexusChat là nền tảng chat realtime theo kiến trúc microservices. Source hiện tại gồm backend Go, web app Next.js được build thành static output và serve bởi binary Go `web`, một Python FastAPI `ai-service`, Docker Compose cho local, Helm chart cho Kubernetes, và workflow GitHub Actions build/scan/sign/deploy trực tiếp lên lab K3s.
+NexusChat is a real-time chat platform built on a microservices architecture. The current source code comprises a Go backend; a Next.js web app (built as static output and served by a Go binary named `web`); a Python FastAPI `ai-service`; Docker Compose for local development; a Helm chart for Kubernetes; and a GitHub Actions workflow that handles building, scanning, signing, and deploying directly to a K3s lab environment.
 
-## Thành phần trong repository
+## Components in the repository
 
-| Khu vực | Đường dẫn | Vai trò |
+| Area | Path | Role |
 | --- | --- | --- |
 | Go services | `cmd/`, `pkg/`, `internal/wire/`, `proto/` | CLI `server` với subcommand `web`, `chat`, `match`, `user`, `uploader`, `forwarder`; HTTP/gRPC/WebSocket; Wire DI |
 | Frontend | `frontend/` | Next.js 15 + React 19 + TypeScript chat UI, static export được serve từ `frontend/out` bởi Go `web` |
@@ -231,22 +231,3 @@ Do not commit `.env`, kubeconfig, OAuth secrets, JWT secrets, S3 credentials, da
 - `docs/devsecops-platform-plan.md`: current DevSecOps architecture.
 - `docs/devsecops-implementation-runbook.md`: implementation and operations runbook.
 - `ai-service/README.md`: AI service setup and API.
-
-## Commit/push guidance
-
-The repo currently contains many modified/untracked files. Before committing, review exactly what will be staged:
-
-```bash
-git status --short
-git diff -- README.md docs/*.md ai-service/README.md deployments/platform/UI-ACCESS.md
-```
-
-For this documentation update, prefer staging only the documentation files you intend to commit rather than blindly `git add .` unless you have already reviewed all unrelated source/config changes:
-
-```bash
-git add README.md docs/*.md ai-service/README.md deployments/platform/UI-ACCESS.md
-git commit -m "docs: update NexusChat architecture and k8s deployment pipeline"
-git push origin main
-```
-
-If you intentionally want to publish every modified/untracked file in the working tree, run `git status --short` first, confirm no secrets or build artifacts are included, then use `git add .`.
