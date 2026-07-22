@@ -216,6 +216,40 @@ flowchart LR
 - AI service direct endpoints: `/health`, `/ready`, `/metrics`, `/v1/assistant/rewrite`, `/v1/assistant/rewrite/stream`, `/v1/agents`, `/v1/mcp/tools`, `/v1/mcp/tools/preview`.
 - Prometheus metrics on Go services and AI service; OTLP tracing hooks to Jaeger/collector.
 
+## UI walkthrough: how to use the chat app
+
+The screenshots in `docs/asset/` show the main user journey on the current NexusChat frontend: sign in, start matching, chat in realtime, upload media, and use AI-assisted rewriting from the message composer.
+
+### 1. Sign in
+
+![NexusChat login screen](docs/asset/image-login.png)
+
+Open the web app at `http://localhost` after the local stack is running. On the first screen, enter a display name to create a local session, or use **Continue with Google** when Google OAuth is configured. The display name is used in the chat header, message bubbles, avatars, and channel membership state.
+
+### 2. Start random matching
+
+![NexusChat start matching screen](docs/asset/image-start-matching.png)
+
+After signing in, click **Start Matching** to open the matching WebSocket. The `match` service places the user into the waiting pool and creates or resolves a chat channel when another user is available. Once a match is found, the browser enters the `/chat` experience automatically.
+
+### 3. Send realtime messages
+
+![NexusChat realtime chat screen](docs/asset/image-chat.png)
+
+The chat screen is designed for two active users in the same channel. The header shows the current user, peer name, connection status, quick actions, and the **Leave** control. The composer at the bottom sends messages over WebSocket, while the message area shows incoming and outgoing bubbles, timestamps, delivery/read indicators, typing state, reactions, and per-message action menus for supported actions such as reply, edit, delete-for-all, and pin/unpin.
+
+### 4. Upload and preview images
+
+![NexusChat image upload screen](docs/asset/image-upload.png)
+
+Use the attachment button or drag files into the chat area to upload media. Small files are sent through the uploader proxy path, while the backend also supports presigned and multipart upload flows. Uploaded images render inline as chat messages, and the media/gallery action in the header lets users inspect shared media in the current channel.
+
+### 5. Rewrite messages with AI
+
+![NexusChat AI rewrite controls](docs/asset/image-feature-ai.png)
+
+Click the sparkle/AI action beside the composer to show rewrite controls. The UI currently exposes quick tone options such as **Professional**, **Friendly**, and **Shorter**. When a user selects a tone, the frontend calls the Go chat proxy at `/api/chat/ai/rewrite`, which forwards the request to the Python `ai-service`; the returned text is placed back into the composer so the user can review it before sending.
+
 ## Tech stack and why it is used
 
 | Layer | Technology | How it is used in this project | Problem it solves |
