@@ -73,6 +73,65 @@ const docTemplatechat = `{
                 }
             }
         },
+        "/chat/ai/rewrite": {
+            "post": {
+                "description": "Forward a rewrite request to the independent AI service",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "Rewrite text with AI",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "channel authorization",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "rewrite request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/chat.AIRewriteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/chat.AIRewriteResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/chat/channel": {
             "delete": {
                 "description": "Delete a channel",
@@ -120,6 +179,59 @@ const docTemplatechat = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/chat/channel/media": {
+            "get": {
+                "description": "List media messages in a channel filtered by type",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "List media messages",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "channel authorization",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "media type (image, video, audio, document, all)",
+                        "name": "type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "limit",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/chat.MessagesPresenter"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/common.ErrResponse"
                         }
@@ -186,6 +298,110 @@ const docTemplatechat = `{
                 }
             }
         },
+        "/chat/channel/pins": {
+            "get": {
+                "description": "Get all pinned messages of a channel",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "Get pinned messages",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "channel authorization",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/chat.PinnedMessagePresenter"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/chat/channel/search": {
+            "get": {
+                "description": "Search messages in a channel",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "Search messages",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "channel authorization",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "search query",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "limit",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/chat.MessagesPresenter"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/chat/forwardauth": {
             "get": {
                 "description": "Traefik forward auth endpoint for channel authentication",
@@ -220,6 +436,218 @@ const docTemplatechat = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/chat/notification/prefs": {
+            "get": {
+                "description": "Get notification preferences for the authenticated user",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "Get notification preferences",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "channel authorization",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Set notification preferences for the authenticated user",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "Set notification preferences",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "channel authorization",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "user id",
+                        "name": "uid",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "preference (all, mentions, mute)",
+                        "name": "pref",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.SuccessMessage"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/chat/role": {
+            "get": {
+                "description": "Get the role of the authenticated user in the channel",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "Get my role",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "channel authorization",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Assign a role to a user in the channel",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "chat"
+                ],
+                "summary": "Assign role",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "channel authorization",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "user id to assign role",
+                        "name": "uid",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "role to assign (owner, admin, member)",
+                        "name": "role",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.SuccessMessage"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/common.ErrResponse"
                         }
@@ -329,17 +757,72 @@ const docTemplatechat = `{
         }
     },
     "definitions": {
+        "chat.AIRewriteRequest": {
+            "type": "object",
+            "required": [
+                "text"
+            ],
+            "properties": {
+                "locale": {
+                    "type": "string"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "tone": {
+                    "type": "string"
+                }
+            }
+        },
+        "chat.AIRewriteResponse": {
+            "type": "object",
+            "properties": {
+                "model": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "text": {
+                    "type": "string"
+                }
+            }
+        },
         "chat.MessagePresenter": {
             "type": "object",
             "properties": {
+                "deleted_by": {
+                    "type": "string"
+                },
+                "deleted_for_all": {
+                    "type": "boolean"
+                },
+                "edited_at": {
+                    "type": "integer"
+                },
                 "event": {
                     "type": "integer"
+                },
+                "is_pinned": {
+                    "type": "boolean"
                 },
                 "message_id": {
                     "type": "string"
                 },
+                "parent_id": {
+                    "type": "string"
+                },
                 "payload": {
                     "type": "string"
+                },
+                "reactions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/chat.ReactionSummaryPresenter"
+                    }
+                },
+                "reply_preview": {
+                    "$ref": "#/definitions/chat.ReplyPreviewPresenter"
                 },
                 "seen": {
                     "type": "boolean"
@@ -362,6 +845,51 @@ const docTemplatechat = `{
                     }
                 },
                 "next_ps": {
+                    "type": "string"
+                }
+            }
+        },
+        "chat.PinnedMessagePresenter": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string"
+                },
+                "pinned_at": {
+                    "type": "integer"
+                },
+                "pinned_by": {
+                    "type": "string"
+                }
+            }
+        },
+        "chat.ReactionSummaryPresenter": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "emoji": {
+                    "type": "string"
+                },
+                "user_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "chat.ReplyPreviewPresenter": {
+            "type": "object",
+            "properties": {
+                "message_id": {
+                    "type": "string"
+                },
+                "payload": {
+                    "type": "string"
+                },
+                "user_id": {
                     "type": "string"
                 }
             }

@@ -3,6 +3,5 @@ run.sh
 .DS_Store
 swagger.json
 swagger.yaml
-frontend/out
 frontend/.next
 frontend/node_modules

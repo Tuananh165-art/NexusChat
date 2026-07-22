@@ -43,6 +43,8 @@ spec:
           value: staging
         - name: global.domain
           value: staging.nexuschat.example.com
+        - name: imageDefaults.tag
+          value: latest
   destination:
     server: https://kubernetes.default.svc
     namespace: nexuschat-staging

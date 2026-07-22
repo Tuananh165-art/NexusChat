@@ -1,137 +1,132 @@
 # Clean Code And Design Patterns
 
-This document defines the implementation standard for NexusChat. It is intentionally specific to the current Go microservice backend and Next.js frontend.
+This document defines implementation standards for the current NexusChat codebase: Go microservices, Next.js frontend, and Python FastAPI AI service.
 
 ## Goals
 
-- Make service behavior easy to read from use-case methods.
+- Make service behavior readable from use-case methods.
 - Keep infrastructure choices replaceable behind small interfaces.
-- Prevent message, cache, and API formats from spreading through unrelated code.
-- Keep UI pages maintainable as chat features grow.
-- Make production changes reviewable through explicit contracts and tests.
+- Prevent message/cache/API formats from spreading through unrelated code.
+- Keep frontend chat flows maintainable as realtime features grow.
+- Keep AI provider/tool logic isolated in `ai-service`.
+- Make deployment changes reviewable through explicit contracts and tests.
 
-## Backend Layering Standard
+## Go backend layering
 
-Each `pkg/<service>` package should follow these responsibilities:
+Each `pkg/<service>` package should keep responsibilities separated:
 
-- `domain.go`: domain constants, entity structs, permissions, pure helpers, and invariant checks.
-- `service.go`: use cases, orchestration, authorization decisions, event selection, and error context.
-- `repo.go` or focused repository files: persistence, cache, broker, gRPC client calls, pagination, and query details.
-- `http_api.go` / `grpc_rpc.go`: request decoding, service invocation, presenter conversion, and transport status mapping.
-- `router.go`: route registration and middleware composition only.
-- `presenter.go`: output DTOs and serialization-friendly shapes.
-- `error.go`: sentinel errors and mapping-friendly error vocabulary.
+- `domain.go`: constants, entities, permissions, pure helpers, invariants.
+- `service.go`: use cases, orchestration, authorization decisions, event selection, error context.
+- `repo.go` or focused repository files: Redis, Cassandra, Kafka, S3, gRPC/HTTP client calls and pagination/query details.
+- `http.go` / `http_api.go` / `grpc_rpc.go`: route registration, request decoding, service invocation, presenter conversion, transport status mapping.
+- `presenter.go`: response DTOs.
+- `error.go`: sentinel errors and mapping-friendly vocabulary.
 
-When a file starts mixing multiple responsibilities, split by responsibility before adding more branches.
+When a file mixes multiple responsibilities, split by responsibility before adding more branches.
 
-## Required Patterns
+## Required Go patterns
 
-### Dependency Injection
+### Dependency injection
 
-Use constructor injection and Wire-generated composition for concrete dependencies. Service structs should depend on interfaces that express the use case needs.
+Use constructor injection and Wire-generated composition. Services should depend on small interfaces expressing use-case needs.
 
-Do:
+Avoid global infrastructure clients in service logic.
 
-```go
-type MessageServiceImpl struct {
-	msgRepo MessageRepoCache
-	userRepo UserRepoCache
-	sf common.IDGenerator
-}
-```
+### Repository pattern
 
-Avoid:
+Repositories own data access and external clients. Services should not know Redis keys, Cassandra CQL, Kafka topic implementation details, S3 object layout, or gRPC method descriptors.
 
-```go
-var redisClient = redis.NewClient(...)
-```
+### Factory/builder helpers
 
-### Repository Pattern
+Use small helpers for repeated message/event/presenter construction so fields such as `Event`, `Payload`, `Time`, `DeletedForAll`, `ParentID`, reactions and pin payloads do not drift across methods.
 
-Repositories own data access and external clients. Services should not know Redis keys, Cassandra CQL, Kafka topics, S3 object layout, or gRPC method descriptors.
+### Strategy by interface
 
-Repository methods should be named after domain intent, not storage operations, when possible:
+Introduce interfaces for infrastructure variants such as ID generation, object signing, publishing, session cache, inter-service clients, and AI clients. Do not introduce strategy abstractions for one-off branches.
 
-- Prefer `GetUserIDBySession`.
-- Avoid leaking `GET rc:session:<sid>` into services.
+### Middleware chain
 
-### Factory/Builder Helpers
+HTTP middleware handles cross-cutting transport concerns: auth context, body limits, CORS, logging, metrics, tracing, rate limits. Business decisions stay in services.
 
-Use small factory helpers for repeated domain object creation, especially messages and events. This prevents fields such as `Event`, `Payload`, `Time`, and `DeletedForAll` from drifting across methods.
+## Error handling
 
-Factory helpers belong near the service or domain that owns the format. Keep them unexported unless another package truly needs them.
-
-### Strategy By Interface
-
-When behavior has multiple infrastructure implementations, model it as an interface. Examples: ID generation, object signing, publishing, session cache, and inter-service clients.
-
-Do not introduce a strategy abstraction for one-off `if` statements.
-
-### Presenter/DTO Pattern
-
-Keep API response shaping out of repositories. Convert domain entities to presenters at transport boundaries or via explicit presenter methods.
-
-### Middleware Chain
-
-HTTP middleware should be composable and side-effect focused: auth context, body limits, CORS, logging, metrics, and tracing. Business decisions should remain in services.
-
-## Error Handling
-
-- Use sentinel errors for domain decisions such as not found, unauthorized, already deleted, or limit exceeded.
+- Use sentinel errors for domain decisions such as not found, unauthorized, already deleted, rate limited, or limit exceeded.
 - Wrap infrastructure errors with operation context using `%w`.
-- Include identifiers in service-level errors when they help debugging.
-- Do not log and return the same error in the same layer unless the log adds request-scoped fields unavailable to callers.
-- Do not swallow cleanup errors when the cleanup is part of the operation's correctness.
+- Include identifiers when they materially help debugging.
+- Do not log and return the same error at the same layer unless the log adds request-scoped fields not available to callers.
+- Do not swallow cleanup errors when cleanup is part of operation correctness.
 
-## Context Rules
+## Context rules
 
-- Pass `ctx` from transport to every repository/client call.
+- Pass `ctx` from transport to every repository/client/provider call.
 - Avoid `context.Background()` in request use cases.
-- Background contexts are acceptable only in process lifecycle code or explicitly detached jobs.
+- Detached background work must be explicit and tied to process lifecycle or durable queue semantics.
 
-## Naming Rules
+## Naming rules
 
-- Use service vocabulary consistently: `channelID`, `userID`, `messageID`, `subscriber`, `accessToken`, `pageState`.
-- Prefer positive boolean names: `matched`, `exists`, `hasMoreMessages`.
-- Avoid abbreviations unless already established by protocol or library names.
-- Fix spelling in touched code when it is local and safe.
+- Use established vocabulary: `channelID`, `userID`, `messageID`, `subscriber`, `accessToken`, `pageState`, `objectKey`, `uploadID`.
+- Prefer positive booleans: `matched`, `exists`, `hasMoreMessages`, `enabled`.
+- Avoid abbreviations unless already established by protocol/library names.
 
-## Frontend Structure Standard
+## Frontend structure
 
-Large pages should be decomposed by feature state:
+Current frontend is under `frontend/src`. As chat UI grows, keep heavy page logic decomposed by feature:
 
-- `hooks/useChatSession.ts`: authentication bootstrap, websocket connection, visibility, reconnection.
+- `hooks/useChatSession.ts`: auth bootstrap, WebSocket connection, visibility/reconnect.
 - `hooks/useChatMessages.ts`: message merge, optimistic send, seen/delivered/edit/delete/reaction/pin reducers.
-- `hooks/useChatUploads.ts`: paste, drag/drop, chunked upload, upload progress.
-- `components/chat/*`: message list, composer, header, search overlay, gallery, notification menu, profile modal.
+- `hooks/useChatUploads.ts`: paste/drag/drop/chunked upload/progress.
+- `components/chat/*`: message list, composer, header, search, gallery, profile/modal surfaces.
 - `lib/*`: API clients, constants, offline persistence, parsing helpers.
 
-UI components should receive data and callbacks. They should not fetch unrelated resources directly when a page-level hook already owns the workflow.
+UI components should receive data and callbacks. They should not fetch unrelated resources directly when a page-level hook or `lib/api.ts` owns the workflow.
 
-## Frontend State Rules
+## Frontend state rules
 
-- Keep websocket event parsing centralized.
-- Keep event payload parsers next to constants so format changes are single-point edits.
+- Keep WebSocket event parsing centralized.
+- Keep event payload parsers next to constants.
 - Use stable keys and IDs for optimistic UI updates.
 - Keep localStorage keys centralized.
-- Isolate browser-only APIs behind guards for server rendering compatibility.
+- Guard browser-only APIs for server rendering compatibility.
+- Keep AI composer behavior behind API client functions; UI should not know provider details.
 
-## Testing Expectations
+## Python AI service rules
 
-- Domain helpers: table tests.
-- Services: unit tests with fake repositories/clients.
-- Repositories: integration tests or documented manual verification when external infrastructure is required.
-- HTTP/gRPC handlers: request/response mapping tests for validation and error cases.
-- Frontend hooks/helpers: unit tests for event parsing, message reducers, upload decisions, and localStorage behavior.
+`ai-service` uses clean architecture boundaries:
 
-Minimum evidence for a backend change is `go test ./...`. Minimum evidence for a frontend change is `npm --prefix frontend run build`, plus focused tests when present.
+- Routers parse/validate HTTP only.
+- Application services orchestrate use cases.
+- Provider adapters own external OpenAI-compatible HTTP details.
+- Prompt builders live under `app/prompts`.
+- Agent/workflow/MCP policies stay in Python, not Go chat.
+- SQLAlchemy/Alembic persistence stays behind repository/model boundaries.
+- Do not log provider keys, full prompts, or sensitive chat context.
+- External tool/MCP side effects must be preview-first and audited.
 
-## Refactor Checklist
+## API and generated docs
 
-- The public contract is unchanged or the contract change is documented.
+- Swagger files under `docs/user`, `docs/match`, `docs/chat`, `docs/uploader` are generated by `make doc`; do not hand-edit generated files.
+- Any change to persisted data, cache keys, Kafka payloads, protobuf fields, Swagger contracts, Helm values, or public routes requires documentation/update notes in the PR.
+
+## Testing expectations
+
+Minimum evidence by touched area:
+
+| Area | Minimum check |
+| --- | --- |
+| Go backend | `go test ./...` or `make test` |
+| Frontend | `npm --prefix frontend run lint` and `npm --prefix frontend run build` |
+| AI service | `python -m ruff check .` and `python -m pytest` inside `ai-service` |
+| Helm/deploy config | `helm lint deployments/helm/nexuschat` plus default and lab `helm template` renders |
+| Docs only | Link/path sanity plus no stale references to removed files/flows |
+
+Run the repo's canonical `make test` / `make build` when a change can affect the full workspace.
+
+## Refactor checklist
+
+- Public contract unchanged or contract change documented.
 - Domain behavior moved inward, not outward.
-- Repeated payload or DTO construction is centralized.
-- Context propagation is preserved.
+- Repeated payload/DTO construction centralized.
+- Context propagation preserved.
 - Errors still wrap original causes.
-- Generated files are not hand edited.
-- Tests or build checks were run and recorded.
+- Generated files not hand-edited.
+- Tests/build/render checks run and recorded.

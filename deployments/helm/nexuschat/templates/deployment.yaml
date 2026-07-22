@@ -10,6 +10,15 @@ metadata:
 spec:
   replicas: {{ $svc.replicas }}
   revisionHistoryLimit: 5
+  {{- $strategy := default $.Values.global.deploymentStrategy $svc.deploymentStrategy }}
+  {{- if $strategy }}
+  strategy:
+    type: {{ default "RollingUpdate" $strategy.type }}
+    {{- if and (eq (default "RollingUpdate" $strategy.type) "RollingUpdate") $strategy.rollingUpdate }}
+    rollingUpdate:
+      {{- toYaml $strategy.rollingUpdate | nindent 6 }}
+    {{- end }}
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/instance: {{ $.Release.Name }}

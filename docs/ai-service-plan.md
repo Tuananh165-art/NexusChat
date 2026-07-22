@@ -1,349 +1,134 @@
-# NexusChat AI Service Plan
+# NexusChat AI Service Plan and Current State
 
-## 1. Codebase Inspection
+## 1. Current status
 
-NexusChat currently runs a Go microservice chat system with a Next.js frontend. The inspected runtime services are `web`, `user`, `match`, `chat`, `forwarder`, and `uploader`.
+`ai-service` has been implemented as an independent Python FastAPI microservice under `ai-service/`. It is deployed by Docker Compose and by the Helm chart as service key `services.ai-service`.
 
-The current chat service owns websocket handling, channel membership, message persistence, roles, reactions, pins, keyword search, media listing, and message fanout. It persists chat state in Cassandra, uses Redis for online/cache state, and publishes chat messages through Kafka topic `rc.msg.pub`.
+Current implemented capabilities visible in source:
 
-The AI service must be added as an independent Python service. Existing Go services must not be rewritten, and chat business logic must remain in the chat service.
+- FastAPI app factory and routers.
+- Health/readiness endpoints: `/health`, `/ready`.
+- Prometheus metrics endpoint: `/metrics`.
+- Assistant rewrite endpoint: `/v1/assistant/rewrite`.
+- SSE rewrite endpoint: `/v1/assistant/rewrite/stream`.
+- OpenAI-compatible provider adapter configured by `AI_ENDPOINT`, `AI_API_KEY`, `AI_MODEL`.
+- Agent create/list/get endpoints under `/v1/agents`.
+- MCP tools list and preview endpoints under `/v1/mcp`.
+- SQLAlchemy/Alembic baseline for AI state tables.
+- Tests under `ai-service/tests`.
+- Go `chat` service integration through `/api/chat/ai/rewrite` and `AI_BASEURL`.
 
-## 2. Current Architecture
+## 2. Architecture rule
 
-Runtime boundaries:
+AI-specific logic stays in Python `ai-service`:
 
-- `web`: frontend server and browser-facing Next.js client.
-- `user`: account, OAuth identity, profile, and session lookup.
-- `match`: random matching workflow and channel creation trigger.
-- `chat`: message lifecycle, websocket transport, channel roles, and message queries.
-- `forwarder`: subscriber/session routing.
-- `uploader`: file upload authorization and S3-compatible presigned access.
+- provider selection and HTTP calls,
+- prompt construction,
+- context building,
+- agent/workflow/MCP policy,
+- AI persistence/audit/memory models,
+- streaming response format.
 
-Infrastructure:
+Go `chat` remains source of truth for chat business logic and only calls AI service through stable HTTP contracts.
 
-- Cassandra owns chat message/channel data.
-- Redis owns online users, channel user cache, notification preferences, and short-lived state.
-- Kafka provides at-least-once message fanout.
-- gRPC handles selected internal service calls with retry, timeout, and circuit breaker behavior.
-- Traefik exposes HTTP routes.
-- Prometheus and OpenTelemetry are already part of the platform.
+## 3. Runtime integration
 
-## 3. AI Service Proposal
+Local Compose:
 
-Add `ai-service`, a Python 3.12+ FastAPI microservice with clean architecture.
+- Traefik exposes `ai-service` at `/api/ai` and strips the prefix.
+- Go `chat` uses `AI_BASEURL=http://ai-service:8090`.
+- PostgreSQL service `ai-postgres` backs AI persistence.
 
-The AI service owns:
+Kubernetes/Helm:
 
-- prompt building
-- context building
-- LLM provider abstraction
-- streaming
-- agent execution
-- workflow generation
-- semantic search
-- memory
-- audit logging
-- MCP tool integration
-- AI-specific business rules
+- Service name: `ai-service`.
+- Container port: `8090`.
+- Ingress path: `/api/ai(/|$)(.*)` with nginx rewrite target `/$2`.
+- Lab command runs Alembic migration before Uvicorn.
+- Runtime config comes from Helm env plus secret `nexuschat-runtime`.
 
-The chat service only calls AI service contracts or publishes normal chat messages. It must not embed prompts, provider logic, tool routing, memory logic, or AI workflow rules.
+## 4. Source layers
 
-## 4. Integration Strategy
+| Layer | Path | Responsibility |
+| --- | --- | --- |
+| API | `app/api` | FastAPI app/routers/dependencies/status mapping |
+| Application | `app/application` | Assistant use cases and orchestration |
+| Domain | `app/domain` | Provider/domain errors and LLM abstractions |
+| Providers | `app/providers` | OpenAI-compatible provider adapter |
+| Prompts | `app/prompts` | Rewrite/workflow prompt templates |
+| Context | `app/context` | Chat context client/builder |
+| Agents | `app/agents` | Agent service and schemas integration |
+| Workflow | `app/workflow` | Workflow draft generation service |
+| MCP | `app/mcp` | Registry and policy for preview tools |
+| Persistence | `app/models`, `app/repositories`, `migrations` | SQLAlchemy models, database setup, Alembic migrations |
+| Observability | `app/observability`, `app/api/routers/metrics.py` | Logging and Prometheus metrics |
 
-Recommended first transport:
+## 5. API contract summary
 
-- REST for request/response use cases.
-- Server-Sent Events for token streaming.
-- Kafka later for async agent participant events and long-running workflows.
+| Method | Path | Status |
+| --- | --- | --- |
+| `GET` | `/health` | implemented |
+| `GET` | `/ready` | implemented |
+| `GET` | `/metrics` | implemented |
+| `POST` | `/v1/assistant/rewrite` | implemented |
+| `POST` | `/v1/assistant/rewrite/stream` | implemented |
+| `POST` | `/v1/agents` | implemented |
+| `GET` | `/v1/agents` | implemented |
+| `GET` | `/v1/agents/{agent_id}` | implemented |
+| `GET` | `/v1/mcp/tools` | implemented |
+| `POST` | `/v1/mcp/tools/preview` | implemented |
 
-Comparison:
+Planned/future endpoints should be added only with tests and documentation updates.
 
-- REST is easiest to integrate across Go, Python, browser, and Traefik.
-- gRPC is strong for internal typed calls, but adds cross-language generation overhead.
-- Kafka is already present and should be used for async fanout and event-driven AI jobs, not direct token streaming.
-- Redis Streams are useful for lightweight queues but less aligned with the platform's existing durable broker choice.
-- RabbitMQ and NATS are not recommended initially because they add another broker class.
+## 6. Data model direction
 
-Timeout strategy:
+The AI service owns separate PostgreSQL state instead of writing into chat Cassandra tables directly. Current model layer includes AI-oriented entities for agents, requests/responses, workflows, audit/settings/memory foundations. This keeps chat retention, channel membership, and message correctness independent from AI feature iteration.
 
-- Synchronous assistant calls: 10-30 seconds.
-- Stream setup: 3 seconds.
-- Stream runtime: 2-5 minutes depending on feature.
-- Internal context fetches: 1-3 seconds with bounded message limits.
-- Provider calls: configurable request timeout with cancellation support.
+## 7. Operational requirements
 
-Retry strategy:
-
-- Retry idempotent context reads and provider transient failures.
-- Do not blindly retry non-idempotent workflow creation.
-- Use `Idempotency-Key` for all mutating API calls.
-
-Idempotency:
-
-- Store request key, caller, channel, route, payload hash, and result status.
-- Return the original result for duplicate completed requests.
-- Return conflict when the same key is reused with a different payload hash.
-
-## 5. Product Brainstorm
-
-### AI Agent Participant
-
-AI behaves as a participant in a channel.
-
-Capabilities:
-
-- mention-triggered replies
-- typing/thinking status
-- streaming responses
-- retry and cancel
-- multiple agents per channel
-- per-agent system prompt, temperature, provider, model, and permission profile
-
-### Context-Aware Assistant
-
-User-facing assistant actions:
-
-- summarize conversation
-- rewrite text
-- translate text
-- grammar correction
-- tone adjustment
-- smart reply suggestions
-- semantic search
-- attachment explanation
-- conversation explanation
-
-### AI Workflow Engine
-
-Workflow drafts:
-
-- tasks
-- action items
-- meeting notes
-- checklists
-- calendar event drafts
-- GitHub issue drafts
-
-Workflows are preview-first. External execution must require explicit approval.
-
-## 6. Technical Design
-
-Layers:
-
-- API: FastAPI routers, dependency injection, request validation, status mapping.
-- Application: use cases and orchestration.
-- Domain: entities, value objects, permissions, errors, and policies.
-- Providers: LLM provider interface and OpenAI-compatible adapter.
-- Context: context builders and service clients.
-- Agents: agent runtime and execution policy.
-- Workflow: workflow draft generation and approval state.
-- MCP: internal tool registry and execution policy.
-- Repositories: PostgreSQL and Redis adapters.
-- Observability: structured logging, metrics, tracing.
-
-Provider rule:
-
-- Business logic depends only on provider interfaces.
-- Provider settings come from environment variables.
-- OpenAI-compatible endpoints are supported through `AI_ENDPOINT`, `AI_API_KEY`, and `AI_MODEL`.
-
-## 7. Folder Structure
+Required environment for real provider-backed features:
 
 ```text
-ai-service/
-  app/
-    api/                 FastAPI routers and HTTP dependencies.
-    application/         Use cases and orchestration services.
-    domain/              Entities, value objects, policies, and domain errors.
-    providers/           LLM provider contracts and adapters.
-    agents/              Agent runtime, configs, permissions, and run lifecycle.
-    prompts/             Prompt templates and builders.
-    context/             Conversation, attachment, and memory context builders.
-    workflow/            Workflow draft generation and preview models.
-    mcp/                 Internal MCP registry, clients, policies, and audit hooks.
-    streaming/           SSE event models, cancellation, and stream state.
-    repositories/        Repository interfaces and persistence implementations.
-    models/              SQLAlchemy models.
-    schemas/             Pydantic API schemas.
-    config/              Settings and environment parsing.
-    workers/             Background worker entry points.
-    observability/       Logging, metrics, and tracing setup.
-  migrations/            Alembic migrations.
-  tests/                 Pytest suite.
-  docs/                  Service-specific docs.
+DATABASE_URL=postgresql+asyncpg://...
+REDIS_URL=redis://...
+AI_ENDPOINT=https://provider-compatible/v1
+AI_API_KEY=...
+AI_MODEL=...
+AI_REQUEST_TIMEOUT_SECONDS=60
+CHAT_SERVICE_BASE_URL=http://chat:8081/api/chat
 ```
 
-## 8. Database Design
+Smoke tests:
 
-Use a separate PostgreSQL database for AI state.
-
-Tables:
-
-- `ai_agents`: agent configuration and status.
-- `ai_requests`: request metadata, idempotency key, payload hash, status.
-- `ai_responses`: final answer, token usage, model, provider metadata.
-- `ai_workflows`: workflow drafts, approval state, and execution state.
-- `ai_audit_logs`: prompt hash, context references, policy decisions, and tool calls.
-- `ai_settings`: user, channel, and tenant-level AI settings.
-- `ai_memory`: durable memory, summaries, and embedding references.
-
-Pros:
-
-- independent evolution from chat data
-- clean retention and privacy policy boundaries
-- no direct coupling to Cassandra internals
-- easier audit and cost accounting
-
-Cons:
-
-- requires API/event-based context synchronization
-- adds another datastore to operate
-
-## 9. API Design
-
-Core endpoints:
-
-```text
-GET  /health
-GET  /ready
-GET  /metrics
-
-POST /v1/assistant/rewrite
-POST /v1/assistant/summary
-POST /v1/assistant/translate
-POST /v1/assistant/smart-reply
-POST /v1/assistant/semantic-search
-
-POST /v1/agents
-GET  /v1/agents
-GET  /v1/agents/{agent_id}
-PATCH /v1/agents/{agent_id}
-
-POST /v1/agent-runs
-GET  /v1/agent-runs/{run_id}
-GET  /v1/agent-runs/{run_id}/stream
-POST /v1/agent-runs/{run_id}/cancel
-POST /v1/agent-runs/{run_id}/retry
+```bash
+curl -i http://localhost:8090/health
+curl -X POST http://localhost:8090/v1/assistant/rewrite \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"xin chao toi muon viet lai cau nay","tone":"professional","locale":"Vietnamese"}'
 ```
 
-## 10. Streaming Design
+Kubernetes checks:
 
-Use SSE for first implementation.
+```bash
+kubectl -n nexuschat-lab logs deploy/ai-service --tail=100
+kubectl -n nexuschat-lab exec deploy/ai-service -- env | grep -E 'AI_|DATABASE_URL|REDIS_URL'
+curl -i http://192.168.109.131/api/ai/health
+```
 
-Event types:
+## 8. Roadmap
 
-- `typing`
-- `thinking`
-- `token`
-- `tool_preview`
-- `workflow_preview`
-- `final`
-- `error`
-- `cancelled`
+1. Stabilize assistant rewrite and streaming contracts.
+2. Add explicit workflow router when workflow draft API is finalized.
+3. Add idempotency keys for mutating AI requests.
+4. Expand agent run lifecycle: run, cancel, retry, stream.
+5. Add audited MCP execution approvals beyond preview.
+6. Add semantic memory/search when embedding provider and retention policy are agreed.
+7. Add dashboards/alerts for provider latency, provider error rate, token/cost counters, DB migration status.
 
-SSE is browser-friendly, works through HTTP infrastructure, and is simpler than bidirectional websocket ownership for AI token streams. Existing chat websocket behavior remains owned by the Go chat service.
+## 9. Coding rules
 
-## 11. MCP Design
-
-MCP is internal to AI service.
-
-Rules:
-
-- Chat service does not know MCP server names, schemas, credentials, or tools.
-- AI service exposes high-level preview APIs only.
-- Tool execution is preview-first.
-- External side effects require explicit approval.
-- Every tool attempt is audited.
-
-Planned MCP components:
-
-- `mcp/registry.py`
-- `mcp/policy.py`
-- `mcp/client.py`
-- `mcp/audit.py`
-
-## 12. Implementation Roadmap
-
-Phase 1: Service foundation
-
-- Create Python project skeleton.
-- Add FastAPI app factory.
-- Add typed environment settings.
-- Add health and readiness endpoints.
-- Add smoke tests.
-
-Phase 2: Provider abstraction
-
-- Add LLM provider protocol.
-- Add OpenAI-compatible adapter using `httpx`.
-- Add request/response domain models.
-- Add provider unit tests with mocked HTTP transport.
-
-Phase 3: First assistant capability
-
-- Add rewrite endpoint.
-- Add prompt builder.
-- Add audit placeholder.
-- Add tests for validation and provider orchestration.
-
-Phase 4: Persistence
-
-- Add SQLAlchemy async database setup.
-- Add Alembic baseline.
-- Add request, response, agent, workflow, audit, settings, and memory models.
-
-Phase 5: Streaming
-
-- Add SSE event model.
-- Add streaming provider path.
-- Add cancellation registry backed by Redis.
-
-Phase 6: Context builder
-
-- Add chat service client.
-- Fetch bounded message context from chat REST APIs.
-- Add context redaction and token budgeting.
-
-Phase 7: Agent participant
-
-- Add agent config CRUD.
-- Add agent run lifecycle.
-- Add mention-trigger request schema.
-- Add retry, cancel, typing, and thinking states.
-
-Phase 8: Agent runtime
-
-- Expand agent run orchestration.
-- Tighten MCP preview and execution safety.
-- Extend audit and semantic memory coverage.
-
-Phase 9: Semantic memory/search
-
-- Add memory table and repository.
-- Add embedding provider interface.
-- Add semantic search endpoint.
-
-Phase 10: MCP integration
-
-- Add internal MCP registry and policy.
-- Add preview-only tool calls.
-- Add audited approval flow.
-
-Phase 11: Platform integration
-
-- Add Dockerfile.
-- Add compose service.
-- Add route through Traefik.
-- Add Go client only after Python API contract is stable.
-
-## 13. Step-by-Step Coding Rule
-
-Each step must be completed with:
-
-1. Explanation of scope.
-2. Code generation.
-3. Tests or syntax validation.
-4. Fixes for observed errors.
-5. Short status before moving to the next step.
-
-Large modules must not be implemented in one pass.
+- Every new router needs request/response schemas and tests.
+- Provider-facing logic must depend on interfaces/protocols, not direct route code.
+- External side effects must be preview-first and auditable.
+- Do not import Go chat storage/schema into Python AI service.
+- Do not log prompts or provider keys in plaintext.

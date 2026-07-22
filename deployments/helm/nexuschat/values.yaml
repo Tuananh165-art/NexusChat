@@ -4,6 +4,11 @@ global:
   environment: staging
   domain: nexuschat.example.com
   tlsSecretName: nexuschat-tls
+  deploymentStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
   commonEnv:
     KAFKA_ADDRS: kafka.kafka.svc.cluster.local:9092
     KAFKA_VERSION: "3.6.0"
@@ -237,9 +242,14 @@ services:
       repository: nexuschat-ai-service
     command: []
     replicas: 2
+    ingress:
+      pathType: ImplementationSpecific
+      annotations:
+        nginx.ingress.kubernetes.io/use-regex: "true"
+        nginx.ingress.kubernetes.io/rewrite-target: /$2
     containerPort: 8090
     metricsPort: 8090
-    path: /api/ai
+    path: /api/ai(/|$)(.*)
     healthPath: /health
     readinessPath: /ready
     env:

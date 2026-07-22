@@ -2,6 +2,7 @@ package uploader
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"strconv"
@@ -9,13 +10,14 @@ import (
 
 	"log/slog"
 
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/config"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 	"github.com/gin-gonic/gin"
-	"github.com/Tuananh165-art/NexusChat/pkg/common"
-	"github.com/Tuananh165-art/NexusChat/pkg/config"
 	"github.com/redis/go-redis/v9"
 	metrics "github.com/slok/go-http-metrics/metrics/prometheus"
 	prommiddleware "github.com/slok/go-http-metrics/middleware"
@@ -45,7 +47,7 @@ type HttpServer struct {
 	name                     string
 	logger                   common.HttpLog
 	svr                      *gin.Engine
-	s3Endpoint               string
+	s3PublicEndpoint         string
 	s3Bucket                 string
 	maxMemory                int64
 	s3Client                 *s3.Client
@@ -81,6 +83,10 @@ func initJWT(config *config.Config) {
 
 func NewHttpServer(name string, logger common.HttpLog, config *config.Config, svr *gin.Engine, channelUploadRateLimiter ChannelUploadRateLimiter) *HttpServer {
 	s3Endpoint := config.Uploader.S3.Endpoint
+	s3PublicEndpoint := config.Uploader.S3.PublicEndpoint
+	if s3PublicEndpoint == "" {
+		s3PublicEndpoint = s3Endpoint
+	}
 	s3Bucket := config.Uploader.S3.Bucket
 	creds := credentials.NewStaticCredentialsProvider(config.Uploader.S3.AccessKey, config.Uploader.S3.SecretKey, "")
 	awsConfig := aws.Config{
@@ -92,17 +98,21 @@ func NewHttpServer(name string, logger common.HttpLog, config *config.Config, sv
 		o.UsePathStyle = true
 		o.BaseEndpoint = aws.String(s3Endpoint)
 	})
+	presignClient := s3.NewPresignClient(s3.NewFromConfig(awsConfig, func(o *s3.Options) {
+		o.UsePathStyle = true
+		o.BaseEndpoint = aws.String(s3PublicEndpoint)
+	}))
 
 	return &HttpServer{
 		name:                     name,
 		logger:                   logger,
 		svr:                      svr,
-		s3Endpoint:               s3Endpoint,
+		s3PublicEndpoint:         s3PublicEndpoint,
 		s3Bucket:                 s3Bucket,
 		maxMemory:                config.Uploader.Http.Server.MaxMemoryByte,
 		s3Client:                 s3Client,
 		uploader:                 manager.NewUploader(s3Client),
-		presigner:                &Presigner{s3.NewPresignClient(s3Client), config.Uploader.S3.PresignLifetimeSecond},
+		presigner:                &Presigner{presignClient, config.Uploader.S3.PresignLifetimeSecond},
 		httpPort:                 config.Uploader.Http.Server.Port,
 		channelUploadRateLimiter: channelUploadRateLimiter,
 		serveSwag:                config.Uploader.Http.Server.Swag,
@@ -147,6 +157,7 @@ func (r *HttpServer) RegisterRoutes() {
 		{
 			uploadGroup.POST("/files", r.UploadFiles)
 			uploadGroup.GET("/presigned", r.GetPresignedUpload)
+			uploadGroup.POST("/proxy", r.ProxyUpload)
 			chunkGroup := uploadGroup.Group("/chunk")
 			{
 				chunkGroup.POST("/init", r.InitChunkUpload)
@@ -167,7 +178,46 @@ func (r *HttpServer) RegisterRoutes() {
 	}
 }
 
+func (r *HttpServer) ensureBucketExists(ctx context.Context) error {
+	_, err := r.s3Client.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(r.s3Bucket),
+	})
+	if err == nil {
+		return nil
+	}
+	if !isMissingBucketError(err) {
+		return err
+	}
+	_, err = r.s3Client.CreateBucket(ctx, &s3.CreateBucketInput{
+		Bucket: aws.String(r.s3Bucket),
+	})
+	if err != nil && !isBucketAlreadyOwnedError(err) {
+		return err
+	}
+	return nil
+}
+
+func isMissingBucketError(err error) bool {
+	var apiErr smithy.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.ErrorCode() == "NoSuchBucket" || apiErr.ErrorCode() == "NotFound"
+}
+
+func isBucketAlreadyOwnedError(err error) bool {
+	var apiErr smithy.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return apiErr.ErrorCode() == "BucketAlreadyOwnedByYou" || apiErr.ErrorCode() == "BucketAlreadyExists"
+}
+
 func (r *HttpServer) Run() {
+	if err := r.ensureBucketExists(context.Background()); err != nil {
+		r.logger.Error("ensure S3 bucket exists failed: " + err.Error())
+		os.Exit(1)
+	}
 	go func() {
 		addr := ":" + r.httpPort
 		r.httpServer = &http.Server{

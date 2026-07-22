@@ -1,6 +1,27 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
+  name: cassandra
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Tuananh165-art/NexusChat.git
+    targetRevision: main
+    path: deployments/platform/cassandra
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cassandra
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
   name: ingress-nginx
   namespace: argocd
 spec:
@@ -20,6 +41,47 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: ingress-nginx
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: traefik
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://traefik.github.io/charts
+    chart: traefik
+    targetRevision: 41.0.1
+    helm:
+      valueFiles: []
+      valuesObject:
+        ingressClass:
+          enabled: true
+          isDefaultClass: false
+          name: traefik
+        providers:
+          kubernetesCRD:
+            enabled: true
+            ingressClass: traefik
+          kubernetesIngress:
+            enabled: true
+            ingressClass: traefik
+        metrics:
+          prometheus:
+            service:
+              enabled: true
+            serviceMonitor:
+              enabled: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: traefik
   syncPolicy:
     automated:
       prune: true

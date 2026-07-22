@@ -12,6 +12,15 @@ definitions:
     required:
     - name
     type: object
+  user.UpdateUserProfileRequest:
+    properties:
+      name:
+        type: string
+      picture:
+        type: string
+    required:
+    - name
+    type: object
   user.UserPresenter:
     properties:
       id:
@@ -125,6 +134,46 @@ paths:
           schema:
             $ref: '#/definitions/common.ErrResponse'
       summary: Get self user
+      tags:
+      - user
+    put:
+      description: Update self user display name and avatar picture
+      parameters:
+      - description: session id cookie
+        in: header
+        name: Cookie
+        required: true
+        type: string
+      - description: updated user profile
+        in: body
+        name: user
+        required: true
+        schema:
+          $ref: '#/definitions/user.UpdateUserProfileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/user.UserPresenter'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+      summary: Update self user profile
       tags:
       - user
   /user/oauth2/google/callback:

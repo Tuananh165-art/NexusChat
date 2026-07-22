@@ -1,36 +1,54 @@
 {{- if .Values.ingress.enabled }}
+{{- range $name, $svc := .Values.services }}
+{{- $svcIngress := default (dict) $svc.ingress }}
+{{- $svcIngressEnabled := true }}
+{{- if hasKey $svcIngress "enabled" }}
+  {{- $svcIngressEnabled = $svcIngress.enabled }}
+{{- end }}
+{{- if and $svc.enabled $svc.path $svcIngressEnabled }}
+{{- $host := default $.Values.global.domain $svcIngress.host }}
+{{- $className := default $.Values.ingress.className $svcIngress.className }}
+{{- $forwardAuth := default (dict) $svcIngress.traefikForwardAuth }}
+{{- $pathType := default "Prefix" $svcIngress.pathType }}
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "nexuschat.fullname" . }}
+  name: {{ include "nexuschat.ingressName" (dict "root" $ "name" $name) }}
   labels:
-    {{- include "nexuschat.labels" . | nindent 4 }}
+    {{- include "nexuschat.serviceLabels" (dict "root" $ "name" $name) | nindent 4 }}
   annotations:
-    {{- toYaml .Values.ingress.annotations | nindent 4 }}
+    {{- with $.Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- if $forwardAuth.enabled }}
+    traefik.ingress.kubernetes.io/router.middlewares: {{ include "nexuschat.traefikMiddlewareRef" (dict "root" $ "name" $name) | quote }}
+    {{- end }}
+    {{- with $svcIngress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 spec:
-  ingressClassName: {{ .Values.ingress.className }}
-  {{- if and .Values.global.domain .Values.global.tlsSecretName }}
+  ingressClassName: {{ $className }}
+  {{- if and $host $.Values.global.tlsSecretName }}
   tls:
     - hosts:
-        - {{ .Values.global.domain }}
-      secretName: {{ .Values.global.tlsSecretName }}
+        - {{ $host | quote }}
+      secretName: {{ $.Values.global.tlsSecretName }}
   {{- end }}
   rules:
     -
-{{ if .Values.global.domain }}
-      host: {{ .Values.global.domain | quote }}
-{{ end }}
+      {{- if $host }}
+      host: {{ $host | quote }}
+      {{- end }}
       http:
         paths:
-          {{- range $name, $svc := .Values.services }}
-          {{- if and $svc.enabled $svc.path }}
           - path: {{ $svc.path }}
-            pathType: Prefix
+            pathType: {{ $pathType }}
             backend:
               service:
                 name: {{ $name }}
                 port:
                   name: http
-          {{- end }}
-          {{- end }}
+{{- end }}
+{{- end }}
 {{- end }}

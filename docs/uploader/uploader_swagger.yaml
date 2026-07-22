@@ -5,6 +5,24 @@ definitions:
       msg:
         type: string
     type: object
+  common.SuccessMessage:
+    properties:
+      msg:
+        example: ok
+        type: string
+    type: object
+  uploader.ChunkPresignedResponse:
+    properties:
+      url:
+        type: string
+    type: object
+  uploader.ChunkUploadInitResponse:
+    properties:
+      object_key:
+        type: string
+      upload_id:
+        type: string
+    type: object
   uploader.PresignedDownload:
     properties:
       url:
@@ -39,6 +57,46 @@ info:
   title: Uploader Service Swagger API
   version: "2.0"
 paths:
+  /uploader/download/file:
+    get:
+      description: Proxy download a file from S3 through the uploader service
+      parameters:
+      - description: base64-encoded object key
+        in: query
+        name: okb64
+        required: true
+        type: string
+      - description: channel authorization
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+      summary: Proxy download file
+      tags:
+      - uploader
   /uploader/download/presigned:
     get:
       description: Get presigned url for downloading a file from S3
@@ -73,6 +131,180 @@ paths:
           schema:
             $ref: '#/definitions/common.ErrResponse'
       summary: Get presigned download url
+      tags:
+      - uploader
+  /uploader/upload/chunk/abort:
+    delete:
+      description: Abort a multipart upload
+      parameters:
+      - description: object key
+        in: query
+        name: object_key
+        required: true
+        type: string
+      - description: upload id
+        in: query
+        name: upload_id
+        required: true
+        type: string
+      - description: channel authorization
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.SuccessMessage'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+      summary: Abort chunk upload
+      tags:
+      - uploader
+  /uploader/upload/chunk/complete:
+    post:
+      description: Complete a multipart upload
+      parameters:
+      - description: object key
+        in: query
+        name: object_key
+        required: true
+        type: string
+      - description: upload id
+        in: query
+        name: upload_id
+        required: true
+        type: string
+      - description: channel authorization
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.SuccessMessage'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+      summary: Complete chunk upload
+      tags:
+      - uploader
+  /uploader/upload/chunk/init:
+    post:
+      description: Initiate a multipart upload and return the upload ID
+      parameters:
+      - description: file extension
+        in: query
+        name: ext
+        required: true
+        type: string
+      - description: original filename
+        in: query
+        name: filename
+        required: true
+        type: string
+      - description: total number of parts
+        in: query
+        name: total_parts
+        required: true
+        type: integer
+      - description: channel authorization
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/uploader.ChunkUploadInitResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+      summary: Initiate chunk upload
+      tags:
+      - uploader
+  /uploader/upload/chunk/presign:
+    get:
+      description: Get presigned URL for uploading a specific chunk part
+      parameters:
+      - description: object key
+        in: query
+        name: object_key
+        required: true
+        type: string
+      - description: upload id
+        in: query
+        name: upload_id
+        required: true
+        type: string
+      - description: part number (1-based)
+        in: query
+        name: part_number
+        required: true
+        type: integer
+      - description: channel authorization
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/uploader.ChunkPresignedResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+      summary: Get presigned URL for chunk
       tags:
       - uploader
   /uploader/upload/files:
@@ -150,6 +382,50 @@ paths:
           schema:
             $ref: '#/definitions/common.ErrResponse'
       summary: Get presigned upload url
+      tags:
+      - uploader
+  /uploader/upload/proxy:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Upload file through uploader service (bypasses presigned URL DNS
+        issues)
+      parameters:
+      - description: file to upload
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: file extension
+        in: query
+        name: ext
+        required: true
+        type: string
+      - description: channel authorization
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/uploader.PresignedUpload'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+      summary: Proxy upload file
       tags:
       - uploader
 swagger: "2.0"

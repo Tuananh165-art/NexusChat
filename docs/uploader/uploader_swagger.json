@@ -11,6 +11,66 @@
     },
     "basePath": "/api",
     "paths": {
+        "/uploader/download/file": {
+            "get": {
+                "description": "Proxy download a file from S3 through the uploader service",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "uploader"
+                ],
+                "summary": "Proxy download file",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "base64-encoded object key",
+                        "name": "okb64",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "channel authorization",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/uploader/download/presigned": {
             "get": {
                 "description": "Get presigned url for downloading a file from S3",
@@ -42,6 +102,264 @@
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/uploader.PresignedDownload"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/uploader/upload/chunk/abort": {
+            "delete": {
+                "description": "Abort a multipart upload",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "uploader"
+                ],
+                "summary": "Abort chunk upload",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "object key",
+                        "name": "object_key",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "upload id",
+                        "name": "upload_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "channel authorization",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.SuccessMessage"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/uploader/upload/chunk/complete": {
+            "post": {
+                "description": "Complete a multipart upload",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "uploader"
+                ],
+                "summary": "Complete chunk upload",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "object key",
+                        "name": "object_key",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "upload id",
+                        "name": "upload_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "channel authorization",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/common.SuccessMessage"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/uploader/upload/chunk/init": {
+            "post": {
+                "description": "Initiate a multipart upload and return the upload ID",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "uploader"
+                ],
+                "summary": "Initiate chunk upload",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "file extension",
+                        "name": "ext",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "original filename",
+                        "name": "filename",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "total number of parts",
+                        "name": "total_parts",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "channel authorization",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/uploader.ChunkUploadInitResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/uploader/upload/chunk/presign": {
+            "get": {
+                "description": "Get presigned URL for uploading a specific chunk part",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "uploader"
+                ],
+                "summary": "Get presigned URL for chunk",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "object key",
+                        "name": "object_key",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "upload id",
+                        "name": "upload_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "part number (1-based)",
+                        "name": "part_number",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "channel authorization",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/uploader.ChunkPresignedResponse"
                         }
                     },
                     "400": {
@@ -179,6 +497,70 @@
                     }
                 }
             }
+        },
+        "/uploader/upload/proxy": {
+            "post": {
+                "description": "Upload file through uploader service (bypasses presigned URL DNS issues)",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "uploader"
+                ],
+                "summary": "Proxy upload file",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "file to upload",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "file extension",
+                        "name": "ext",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "channel authorization",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/uploader.PresignedUpload"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/common.ErrResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -186,6 +568,34 @@
             "type": "object",
             "properties": {
                 "msg": {
+                    "type": "string"
+                }
+            }
+        },
+        "common.SuccessMessage": {
+            "type": "object",
+            "properties": {
+                "msg": {
+                    "type": "string",
+                    "example": "ok"
+                }
+            }
+        },
+        "uploader.ChunkPresignedResponse": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "uploader.ChunkUploadInitResponse": {
+            "type": "object",
+            "properties": {
+                "object_key": {
+                    "type": "string"
+                },
+                "upload_id": {
                     "type": "string"
                 }
             }

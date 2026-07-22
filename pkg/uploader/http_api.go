@@ -64,7 +64,7 @@ func (r *HttpServer) UploadFiles(c *gin.Context) {
 		}
 		uploadedFiles = append(uploadedFiles, UploadedFilePresenter{
 			Name: fileHeader.Filename,
-			Url:  joinStrs(r.s3Endpoint, "/", r.s3Bucket, "/", newFileName),
+			Url:  joinStrs(r.s3PublicEndpoint, "/", r.s3Bucket, "/", newFileName),
 		})
 	}
 
@@ -84,6 +84,55 @@ func (r *HttpServer) putFileToS3(ctx context.Context, bucket, fileName string, f
 		return err
 	}
 	return nil
+}
+
+// @Summary Proxy upload file
+// @Description Upload file through uploader service (bypasses presigned URL DNS issues)
+// @Tags uploader
+// @Accept mpfd
+// @param file formData file true "file to upload"
+// @param ext query string true "file extension"
+// @Produce json
+// @param Authorization header string true "channel authorization"
+// @Success 200 {object} PresignedUpload
+// @Failure 400 {object} common.ErrResponse
+// @Failure 401 {object} common.ErrResponse
+// @Failure 500 {object} common.ErrResponse
+// @Router /uploader/upload/proxy [post]
+func (r *HttpServer) ProxyUpload(c *gin.Context) {
+	channelID, ok := c.Request.Context().Value(common.ChannelKey).(uint64)
+	if !ok {
+		response(c, http.StatusUnauthorized, common.ErrUnauthorized)
+		return
+	}
+
+	ext := c.Query("ext")
+	objectKey := newObjectKey(channelID, common.Join(".", ext))
+
+	if err := c.Request.ParseMultipartForm(r.maxMemory); err != nil {
+		r.logger.Error("error parsing multipart form: " + err.Error())
+		response(c, http.StatusBadRequest, common.ErrInvalidParam)
+		return
+	}
+
+	file, _, err := c.Request.FormFile("file")
+	if err != nil {
+		r.logger.Error("error getting file from form: " + err.Error())
+		response(c, http.StatusBadRequest, ErrReceiveFile)
+		return
+	}
+	defer file.Close()
+
+	if err := r.putFileToS3(c.Request.Context(), r.s3Bucket, objectKey, file); err != nil {
+		r.logger.Error("error uploading file to S3: " + err.Error())
+		response(c, http.StatusInternalServerError, ErrUploadFile)
+		return
+	}
+
+	c.JSON(http.StatusOK, &PresignedUpload{
+		ObjectKey: objectKey,
+		Url:       "",
+	})
 }
 
 // @Summary Get presigned upload url

@@ -1,13 +1,49 @@
 basePath: /api
 definitions:
+  chat.AIRewriteRequest:
+    properties:
+      locale:
+        type: string
+      text:
+        type: string
+      tone:
+        type: string
+    required:
+    - text
+    type: object
+  chat.AIRewriteResponse:
+    properties:
+      model:
+        type: string
+      provider:
+        type: string
+      text:
+        type: string
+    type: object
   chat.MessagePresenter:
     properties:
+      deleted_by:
+        type: string
+      deleted_for_all:
+        type: boolean
+      edited_at:
+        type: integer
       event:
         type: integer
+      is_pinned:
+        type: boolean
       message_id:
+        type: string
+      parent_id:
         type: string
       payload:
         type: string
+      reactions:
+        items:
+          $ref: '#/definitions/chat.ReactionSummaryPresenter'
+        type: array
+      reply_preview:
+        $ref: '#/definitions/chat.ReplyPreviewPresenter'
       seen:
         type: boolean
       time:
@@ -22,6 +58,35 @@ definitions:
           $ref: '#/definitions/chat.MessagePresenter'
         type: array
       next_ps:
+        type: string
+    type: object
+  chat.PinnedMessagePresenter:
+    properties:
+      message_id:
+        type: string
+      pinned_at:
+        type: integer
+      pinned_by:
+        type: string
+    type: object
+  chat.ReactionSummaryPresenter:
+    properties:
+      count:
+        type: integer
+      emoji:
+        type: string
+      user_ids:
+        items:
+          type: string
+        type: array
+    type: object
+  chat.ReplyPreviewPresenter:
+    properties:
+      message_id:
+        type: string
+      payload:
+        type: string
+      user_id:
         type: string
     type: object
   chat.UserIDsPresenter:
@@ -86,6 +151,45 @@ paths:
       summary: Start a chat
       tags:
       - chat
+  /chat/ai/rewrite:
+    post:
+      consumes:
+      - application/json
+      description: Forward a rewrite request to the independent AI service
+      parameters:
+      - description: channel authorization
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: rewrite request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/chat.AIRewriteRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/chat.AIRewriteResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+      summary: Rewrite text with AI
+      tags:
+      - chat
   /chat/channel:
     delete:
       description: Delete a channel
@@ -126,6 +230,41 @@ paths:
       summary: Delete channel
       tags:
       - chat
+  /chat/channel/media:
+    get:
+      description: List media messages in a channel filtered by type
+      parameters:
+      - description: channel authorization
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: media type (image, video, audio, document, all)
+        in: query
+        name: type
+        type: string
+      - description: limit
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/chat.MessagesPresenter'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+      summary: List media messages
+      tags:
+      - chat
   /chat/channel/messages:
     get:
       description: List messages of a channel
@@ -161,6 +300,75 @@ paths:
       summary: List channel messages
       tags:
       - chat
+  /chat/channel/pins:
+    get:
+      description: Get all pinned messages of a channel
+      parameters:
+      - description: channel authorization
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/chat.PinnedMessagePresenter'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+      summary: Get pinned messages
+      tags:
+      - chat
+  /chat/channel/search:
+    get:
+      description: Search messages in a channel
+      parameters:
+      - description: channel authorization
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: search query
+        in: query
+        name: q
+        required: true
+        type: string
+      - description: limit
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/chat.MessagesPresenter'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+      summary: Search messages
+      tags:
+      - chat
   /chat/forwardauth:
     get:
       description: Traefik forward auth endpoint for channel authentication
@@ -190,6 +398,148 @@ paths:
           schema:
             $ref: '#/definitions/common.ErrResponse'
       summary: Forward auth
+      tags:
+      - chat
+  /chat/notification/prefs:
+    get:
+      description: Get notification preferences for the authenticated user
+      parameters:
+      - description: channel authorization
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+      summary: Get notification preferences
+      tags:
+      - chat
+    put:
+      description: Set notification preferences for the authenticated user
+      parameters:
+      - description: channel authorization
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: user id
+        in: query
+        name: uid
+        required: true
+        type: string
+      - description: preference (all, mentions, mute)
+        in: query
+        name: pref
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.SuccessMessage'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+      summary: Set notification preferences
+      tags:
+      - chat
+  /chat/role:
+    get:
+      description: Get the role of the authenticated user in the channel
+      parameters:
+      - description: channel authorization
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+      summary: Get my role
+      tags:
+      - chat
+    put:
+      description: Assign a role to a user in the channel
+      parameters:
+      - description: channel authorization
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: user id to assign role
+        in: query
+        name: uid
+        required: true
+        type: string
+      - description: role to assign (owner, admin, member)
+        in: query
+        name: role
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/common.SuccessMessage'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/common.ErrResponse'
+      summary: Assign role
       tags:
       - chat
   /chat/users:

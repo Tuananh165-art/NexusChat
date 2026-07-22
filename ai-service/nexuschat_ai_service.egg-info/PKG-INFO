@@ -1,0 +1,25 @@
+Metadata-Version: 2.4
+Name: nexuschat-ai-service
+Version: 0.1.0
+Summary: Independent AI microservice for NexusChat
+Requires-Python: >=3.12
+Requires-Dist: fastapi>=0.115.0
+Requires-Dist: uvicorn[standard]>=0.30.0
+Requires-Dist: pydantic>=2.8.0
+Requires-Dist: pydantic-settings>=2.4.0
+Requires-Dist: httpx>=0.27.0
+Requires-Dist: sqlalchemy[asyncio]>=2.0.0
+Requires-Dist: alembic>=1.13.0
+Requires-Dist: asyncpg>=0.29.0
+Requires-Dist: redis>=5.0.0
+Requires-Dist: tenacity>=8.5.0
+Requires-Dist: prometheus-client>=0.20.0
+Requires-Dist: opentelemetry-api>=1.25.0
+Requires-Dist: opentelemetry-sdk>=1.25.0
+Requires-Dist: opentelemetry-instrumentation-fastapi>=0.46b0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.2.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23.0; extra == "dev"
+Requires-Dist: respx>=0.21.0; extra == "dev"
+Requires-Dist: ruff>=0.5.0; extra == "dev"
+Requires-Dist: mypy>=1.10.0; extra == "dev"

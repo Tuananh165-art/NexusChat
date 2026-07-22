@@ -1,178 +1,235 @@
 # NexusChat DevSecOps Implementation Runbook
 
-This runbook is the step-by-step implementation guide for the DevSecOps platform assets in this repository.
+Runbook này phản ánh flow hiện tại của repo. Lab deploy dùng GitHub Actions self-hosted runner + Docker Hub + Helm trực tiếp vào K3s. ArgoCD/GitOps là optional/reference, không phải đường deploy lab mặc định.
 
-## 1. Repository Preparation
+## 1. Repository preparation
 
-1. Protect `main` and release tag workflows in GitHub.
-2. Require the `DevSecOps Platform Pipeline` checks before merge.
-3. Enable GitHub Advanced Security or equivalent controls for CodeQL, secret scanning, and dependency alerts.
-4. Configure container registry permissions for GitHub Actions OIDC and GHCR package writes.
-5. Create repository or organization secrets only for external systems that cannot use OIDC.
+1. Bật branch protection cho `main`.
+2. Require workflow `DevSecOps Platform Pipeline` trước khi merge.
+3. Bật GitHub secret scanning/dependency alerts nếu repository plan hỗ trợ.
+4. Tạo Docker Hub access token và lưu vào GitHub Actions secret.
+5. Không commit `.env`, kubeconfig, token, OAuth secret, JWT secret, S3 secret, DB password, AI provider key.
 
-Required GitHub settings:
+Required workflow permissions hiện tại:
 
-- `id-token: write` allowed for workflows that sign images.
-- GHCR package write permission for `GITHUB_TOKEN`.
-- Branch protection requiring reviews from application and DevSecOps owners.
-
-## 2. Cluster Bootstrap
-
-Create namespaces:
-
-```bash
-kubectl create namespace argocd
-kubectl create namespace ingress-nginx
-kubectl create namespace consul
-kubectl create namespace monitoring
-kubectl create namespace logging
-kubectl create namespace security
-kubectl create namespace nexuschat-staging
-kubectl create namespace nexuschat-prod
+```yaml
+contents: read
+security-events: write
+id-token: write
+actions: read
 ```
 
-Install ArgoCD:
+## 2. Lab cluster bootstrap: K3s 4GB path
+
+K3s lab nên dùng ingress-nginx, direct Helm, dependency tối giản. Không cài full ELK/Consul/kube-prometheus-stack/ArgoCD trên máy 4GB trừ khi có lý do rõ ràng.
 
 ```bash
-helm repo add argo https://argoproj.github.io/argo-helm
-helm upgrade --install argocd argo/argo-cd \
-  --namespace argocd \
-  --values deployments/platform/argocd/values.yaml
+curl -sfL https://get.k3s.io | sudo INSTALL_K3S_EXEC="--disable traefik --write-kubeconfig-mode 644" sh -
+mkdir -p ~/.kube
+sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+sudo chown "$USER:$USER" ~/.kube/config
+export KUBECONFIG=~/.kube/config
+kubectl get nodes -o wide
+
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+
+for ns in ingress-nginx nexuschat-lab redis kafka cassandra minio postgres monitoring argocd redis-ui; do
+  kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
+done
 ```
 
-Apply the root platform applications:
+Install ingress-nginx nhẹ:
 
 ```bash
-kubectl apply -f deployments/gitops/applications/platform-apps.yaml
-kubectl apply -f deployments/gitops/applications/nexuschat-staging.yaml
+helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx \
+  --set controller.replicaCount=1 \
+  --set controller.metrics.enabled=false \
+  --set controller.resources.requests.cpu=50m \
+  --set controller.resources.requests.memory=96Mi \
+  --set controller.resources.limits.cpu=300m \
+  --set controller.resources.limits.memory=256Mi
+kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
 ```
 
-Production should be applied only after staging smoke tests pass:
+## 3. Stateful dependencies
+
+Application Helm chart không cài Kafka/Redis/Cassandra/MinIO/PostgreSQL. Cài riêng và đảm bảo endpoints khớp `values-lab-4gb.yaml`:
+
+| Dependency | Expected endpoint in lab values |
+| --- | --- |
+| Kafka | `kafka.kafka.svc.cluster.local:9092` |
+| Redis Cluster | `redis-redis-cluster-0/1/2.redis-redis-cluster-headless.redis.svc.cluster.local:6379` |
+| Cassandra | `cassandra.cassandra.svc.cluster.local:9042` |
+| MinIO | `http://minio.minio.svc.cluster.local:9000` |
+| AI Postgres | `ai-postgres-postgresql.postgres.svc.cluster.local:5432` when using Bitnami chart |
+
+Important: Go backend uses Redis Cluster client. Standalone Redis commonly fails with `ERR This instance has cluster support disabled`.
+
+After Cassandra is ready, apply `cassandra/init.cql`. After MinIO is ready, create bucket `myfilebucket`.
+
+See `docs/deploy-k8s-guide.md` for copy-paste dependency install commands.
+
+## 4. Runtime secret `nexuschat-runtime`
+
+Create in `nexuschat-lab` before app deploy:
 
 ```bash
-kubectl apply -f deployments/gitops/applications/nexuschat-production.yaml
+kubectl create secret generic nexuschat-runtime \
+  --namespace nexuschat-lab \
+  --from-literal=CHAT_JWT_SECRET='change-me' \
+  --from-literal=REDIS_PASSWORD="$REDIS_PASSWORD" \
+  --from-literal=CASSANDRA_USER='admin' \
+  --from-literal=CASSANDRA_PASSWORD="$CASSANDRA_PASSWORD" \
+  --from-literal=UPLOADER_S3_ACCESSKEY="$MINIO_ACCESS_KEY" \
+  --from-literal=UPLOADER_S3_SECRETKEY="$MINIO_SECRET_KEY" \
+  --from-literal=USER_OAUTH_GOOGLE_CLIENTID="$GOOGLE_CLIENT_ID" \
+  --from-literal=USER_OAUTH_GOOGLE_CLIENTSECRET="$GOOGLE_CLIENT_SECRET" \
+  --from-literal=DATABASE_URL="postgresql+asyncpg://nexuschat_ai:$AI_POSTGRES_PASSWORD@ai-postgres-postgresql.postgres.svc.cluster.local:5432/nexuschat_ai" \
+  --from-literal=AI_ENDPOINT="$AI_ENDPOINT" \
+  --from-literal=AI_API_KEY="$AI_API_KEY" \
+  --from-literal=AI_MODEL="$AI_MODEL" \
+  --from-literal=AI_POSTGRES_PASSWORD="$AI_POSTGRES_PASSWORD" \
+  --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-## 3. Secrets
+Use placeholders only for pods to start in a private lab; AI/OAuth features will not work until real values are set.
 
-Production secrets must not be committed to Git.
+## 5. GitHub Actions setup
 
-Create or sync a Kubernetes secret named `nexuschat-runtime` in each application namespace with these keys:
+Repository secrets:
 
-- `CHAT_JWT_SECRET`
-- `REDIS_PASSWORD`
-- `CASSANDRA_USER`
-- `CASSANDRA_PASSWORD`
-- `UPLOADER_S3_ACCESSKEY`
-- `UPLOADER_S3_SECRETKEY`
-- `USER_OAUTH_GOOGLE_CLIENTID`
-- `USER_OAUTH_GOOGLE_CLIENTSECRET`
-- `AI_POSTGRES_PASSWORD`
-- AI provider credentials required by `ai-service`
+- `DOCKER_USERNAME`
+- `DOCKER_PASSWORD`
+- `KUBE_CONFIG_B64` unless the self-hosted runner already has a working kubeconfig.
 
-Recommended production implementation:
-
-1. Store source secrets in a cloud secret manager.
-2. Install External Secrets Operator.
-3. Bind `ExternalSecret` resources to create `nexuschat-runtime`.
-4. Rotate credentials through the secret manager, not through Git.
-
-## 4. Image and Release Promotion
-
-1. Merge application changes to `main`.
-2. Confirm workflow jobs pass: tests, Helm validation, scans, SBOM, image build, image signing.
-3. Confirm staging ArgoCD sync is healthy.
-4. Run smoke tests against `https://staging.nexuschat.example.com`.
-5. Create a signed release tag:
+Create kubeconfig secret:
 
 ```bash
-git tag -s v0.1.0 -m "NexusChat v0.1.0"
-git push origin v0.1.0
+base64 -w0 ~/.kube/config
 ```
 
-6. Update `deployments/gitops/applications/nexuschat-production.yaml` to the release tag and chart image tag.
-7. Merge the promotion change and sync the production app.
+Current deploy job requires a self-hosted runner with labels:
 
-## 5. Nginx Ingress
+```text
+self-hosted, linux, x64, k3s-lab
+```
 
-1. Install `ingress-nginx` through ArgoCD.
-2. Point DNS records to the ingress controller load balancer:
-   - `staging.nexuschat.example.com`
-   - `nexuschat.example.com`
-   - `argocd.nexuschat.example.com`
-3. Configure cert-manager or a cloud certificate controller to create TLS secrets.
-4. Confirm ingress routes:
+This is correct for a private LAN K3s cluster. If you switch to GitHub-hosted runners, the Kubernetes API server must be reachable from GitHub.
+
+## 6. CI/CD execution path
+
+On PR:
+
+1. Go `make test`.
+2. Frontend `npm ci`, `npm run lint`, `npm run build`.
+3. AI `python -m pip install -e ".[dev]"`, `ruff`, `pytest`.
+4. Helm lint/render default + lab profile.
+5. Gitleaks, dependency review, CodeQL, Trivy FS.
+
+On push to `main`:
+
+1. Same validation gates.
+2. Build/push/sign/scan/SBOM primary Docker Hub images.
+3. Build/push proxy/lab variant images.
+4. Deploy lab with Helm directly.
+5. Wait rollout for deployment names: `web chat match user uploader forwarder ai-service`.
+
+## 7. Manual lab deploy equivalent
 
 ```bash
-kubectl get ingress -n nexuschat-staging
-kubectl describe ingress nexuschat -n nexuschat-staging
+export TAG='<git-sha-or-existing-image-tag>'
+helm upgrade --install nexuschat deployments/helm/nexuschat \
+  --namespace nexuschat-lab \
+  --create-namespace \
+  --values deployments/helm/nexuschat/values.yaml \
+  --values deployments/helm/nexuschat/values-lab-4gb.yaml \
+  --set-string imageDefaults.tag="$TAG" \
+  --set-string services.web.image.fullname="docker.io/tuananh165/nexuschat-web:proxy-upload-v2-$TAG" \
+  --set-string services.uploader.image.fullname="docker.io/tuananh165/nexuschat-api:proxy-upload-$TAG" \
+  --wait --timeout 10m
 ```
 
-## 6. Observability
+If you deploy a non-proxy tag manually, remove the two `services.*.image.fullname` overrides or set them to existing image tags.
 
-1. Install kube-prometheus-stack through ArgoCD.
-2. Apply NexusChat alert rules from `deployments/platform/monitoring/nexuschat-rules.yaml`.
-3. Confirm ServiceMonitor discovery:
+## 8. Post-deploy verification
 
 ```bash
-kubectl get servicemonitor -n nexuschat-staging
-kubectl port-forward -n monitoring svc/kube-prometheus-stack-grafana 3000:80
+kubectl -n nexuschat-lab get pods -o wide
+kubectl -n nexuschat-lab get svc
+kubectl -n nexuschat-lab get ingress
+kubectl -n nexuschat-lab get deploy -o jsonpath='{range .items[*]}{.metadata.name}{" => "}{range .spec.template.spec.containers[*]}{.image}{" "}{end}{"\n"}{end}'
+
+for deploy in web chat match user uploader forwarder ai-service; do
+  kubectl -n nexuschat-lab rollout status deployment/$deploy --timeout=600s
+done
+
+curl -I http://192.168.109.131
+curl -i http://192.168.109.131/api/ai/health
 ```
 
-4. In Grafana, verify:
-   - Kubernetes pod health.
-   - Nginx ingress latency and 5xx rate.
-   - NexusChat service request rates and error rates.
-   - Consul sidecar and service mesh metrics.
+If using `nip.io` lab hostnames from `deployments/platform/UI-ACCESS.md`, also check dashboard ingresses.
 
-## 7. ELK Logging
+## 9. Optional platform components
 
-1. Install ECK or the selected Elastic distribution in `logging`.
-2. Apply `deployments/platform/logging/eck-stack.yaml`.
-3. Confirm Elasticsearch, Kibana, and Filebeat are healthy:
+Apply only when the cluster has enough resources:
 
-```bash
-kubectl get elasticsearch,kibana,beat -n logging
-kubectl get pods -n logging
-```
+| Component | Path |
+| --- | --- |
+| ArgoCD values/apps | `deployments/platform/argocd`, `deployments/gitops/applications` |
+| ingress-nginx values | `deployments/platform/ingress-nginx/values.yaml` |
+| Monitoring | `deployments/platform/monitoring/*` |
+| Logging/ELK | `deployments/platform/logging/*` |
+| Kyverno policies | `deployments/platform/security/kyverno-policies.yaml` |
+| Consul | `deployments/platform/consul/values.yaml` |
 
-4. Create Kibana data views for `filebeat-*`.
-5. Add saved searches for NexusChat namespaces and Nginx ingress logs.
-
-## 8. Consul Service Mesh
-
-1. Install Consul using `deployments/platform/consul/values.yaml`.
-2. Confirm injector and controller pods are healthy.
-3. Deploy NexusChat chart with Consul annotations enabled.
-4. Confirm sidecars are injected:
-
-```bash
-kubectl get pods -n nexuschat-staging -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.spec.containers[*].name}{"\n"}{end}'
-```
-
-5. Add service intentions before enforcing deny-by-default mesh policy.
-
-## 9. Security Admission
-
-1. Install Kyverno in `security`.
-2. Apply `deployments/platform/security/kyverno-policies.yaml`.
-3. Run in `Audit` mode first.
-4. Fix violations.
-5. Move production policies to `Enforce` after two clean releases.
+ArgoCD applications in repo are optional examples. Current lab CD does not require ArgoCD sync or GitOps image-tag commits.
 
 ## 10. Rollback
 
-Application rollback:
-
 ```bash
-argocd app history nexuschat-production
-argocd app rollback nexuschat-production <revision-id>
+helm history nexuschat -n nexuschat-lab
+helm rollback nexuschat <REVISION> -n nexuschat-lab
+
+for deploy in web chat match user uploader forwarder ai-service; do
+  kubectl -n nexuschat-lab rollout status deployment/$deploy --timeout=600s
+done
 ```
 
-Image rollback:
+Or redeploy old immutable image tags:
 
-1. Set `imageDefaults.tag` to the last known good immutable tag.
-2. Commit the GitOps change.
-3. Let ArgoCD sync the production app.
+```bash
+export OLD_TAG='<previous-sha>'
+helm upgrade --install nexuschat deployments/helm/nexuschat \
+  --namespace nexuschat-lab \
+  --values deployments/helm/nexuschat/values.yaml \
+  --values deployments/helm/nexuschat/values-lab-4gb.yaml \
+  --set-string imageDefaults.tag="$OLD_TAG" \
+  --set-string services.web.image.fullname="docker.io/tuananh165/nexuschat-web:proxy-upload-v2-$OLD_TAG" \
+  --set-string services.uploader.image.fullname="docker.io/tuananh165/nexuschat-api:proxy-upload-$OLD_TAG" \
+  --wait --timeout 10m
+```
 
-Emergency manual rollback is allowed only during an active incident and must be backfilled into Git before incident closure.
+## 11. Production promotion
+
+Do not rely on mutable `latest`. Promote an approved SHA or `v*` tag:
+
+```bash
+export IMAGE_TAG='<approved-sha-or-v-tag>'
+helm upgrade --install nexuschat deployments/helm/nexuschat \
+  --namespace nexuschat-prod \
+  --create-namespace \
+  --values deployments/helm/nexuschat/values.yaml \
+  --set-string global.environment=production \
+  --set-string global.domain=nexuschat.click \
+  --set-string services.user.env.USER_AUTH_COOKIE_DOMAIN=nexuschat.click \
+  --set-string services.user.env.USER_OAUTH_COOKIE_DOMAIN=nexuschat.click \
+  --set-string services.uploader.env.UPLOADER_S3_PUBLICENDPOINT=https://assets.nexuschat.click \
+  --set-string imageDefaults.tag="$IMAGE_TAG" \
+  --wait --timeout 10m
+```
+
+Before production cutover: TLS secret, DNS, OAuth redirect URIs, CORS/cookie domains, runtime secrets, storage bucket, observability, rollback tag, and smoke tests must be confirmed.

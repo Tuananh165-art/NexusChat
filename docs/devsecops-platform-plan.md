@@ -1,102 +1,192 @@
 # NexusChat DevSecOps Platform Plan
 
-This plan defines the production-grade DevSecOps baseline for running NexusChat on Kubernetes with Helm, GitHub Actions, Nginx Ingress, Prometheus/Grafana, ELK, ArgoCD GitOps, and Consul service mesh.
+Tài liệu này mô tả baseline DevSecOps hiện tại của source code: GitHub Actions build/test/scan/sign image Docker Hub và deploy lab K3s trực tiếp bằng Helm. ArgoCD/Consul/ELK/kube-prometheus-stack vẫn có manifest tham khảo trong repo nhưng không nằm trên critical path deploy lab hiện tại.
 
-## Target Architecture
+## Target architecture
 
-- Kubernetes is the runtime control plane for stateless NexusChat services and stateful dependencies.
-- Helm owns deployable application configuration and platform component values.
-- GitHub Actions owns CI, security checks, image publication, SBOM generation, signing, and chart validation.
-- ArgoCD owns continuous delivery from Git to cluster.
-- Nginx Ingress is the north-south HTTP entry point.
-- Consul service mesh owns east-west service identity, transparent proxying, and service intentions.
-- Prometheus/Grafana owns metrics, dashboards, alerts, and SLO visibility.
-- ELK owns centralized application, ingress, audit, and platform logs.
-- Security controls are applied at repository, build, image, cluster, network, and runtime layers.
+- Runtime control plane: Kubernetes/K3s.
+- Application packaging: Helm chart `deployments/helm/nexuschat`.
+- CI/CD orchestration: `.github/workflows/devsecops-platform.yml`.
+- Registry: Docker Hub namespace `docker.io/tuananh165`.
+- Lab ingress: ingress-nginx, namespace `nexuschat-lab`, server `192.168.109.131`.
+- Security gates: Gitleaks, dependency review, CodeQL, Trivy FS/image, SBOM, Cosign keyless signing.
+- Optional platform add-ons: Prometheus/Grafana, Jaeger, ELK/ECK, Kyverno, ArgoCD, Consul.
 
-## Environment Model
+## Environment model
 
-| Environment | Branch or tag | Namespace | Delivery mode | Purpose |
+| Environment | Source | Namespace | Delivery mode | Notes |
 | --- | --- | --- | --- | --- |
-| `dev` | feature branches and PRs | preview namespaces | CI validation only | Fast feedback, no production data |
-| `staging` | `main` | `nexuschat-staging` | ArgoCD auto-sync | Release rehearsal and integration tests |
-| `production` | signed `v*` tags | `nexuschat-prod` | ArgoCD sync with manual promotion | Customer-facing runtime |
+| `dev` | feature branches / PRs | none or preview | CI validation only | No automatic deploy in current workflow |
+| `lab` | push to `main` | `nexuschat-lab` | Direct Helm from self-hosted GitHub Actions runner | Current active CD path |
+| `staging` | optional ArgoCD app | `nexuschat-staging` | Optional GitOps manifest | Present in `deployments/gitops/applications/nexuschat-staging.yaml`, not required for lab CD |
+| `production` | signed `v*` tag or approved SHA | `nexuschat-prod` or chosen namespace | Manual Helm promotion or optional ArgoCD app | Use immutable image tags only |
 
-## Kubernetes Baseline
+## Helm application scope
 
-- Use one namespace per environment.
-- Run all NexusChat pods as non-root with read-only root filesystems where supported.
-- Apply resource requests and limits for every container.
-- Use horizontal pod autoscaling for HTTP-facing services.
-- Use pod disruption budgets for services with more than one replica.
-- Use NetworkPolicy default-deny semantics and explicitly allow ingress, mesh, observability, and dependency traffic.
-- Store runtime secrets outside Git. The chart supports `envFromSecrets`; production should bind those through External Secrets Operator or sealed secrets.
-- Use TLS at the ingress boundary. Internal service-to-service encryption and identity are delegated to Consul mesh.
+The chart deploys:
 
-## Helm Scope
+- Deployments/Services for `web`, `chat`, `match`, `user`, `uploader`, `forwarder`, `ai-service`.
+- Nginx Ingress resources for services with paths.
+- Optional Traefik Middleware resource only when `services.<name>.ingress.traefikForwardAuth.enabled=true`.
+- ServiceAccounts, security contexts, resource requests/limits.
+- HPA, PDB, ServiceMonitor, NetworkPolicy when enabled.
 
-The application chart under `deployments/helm/nexuschat` manages:
+The chart intentionally does not install Kafka, Redis, Cassandra, MinIO/S3, PostgreSQL, ingress-nginx, cert-manager, Prometheus/Grafana, ELK, Consul, or ArgoCD. Those are platform dependencies and must be installed separately.
 
-- `web`, `chat`, `match`, `user`, `uploader`, `forwarder`, and `ai-service` deployments.
-- Services and ingress routes.
-- Prometheus scrape annotations and optional `ServiceMonitor` resources.
-- Service accounts, security contexts, resource limits, HPAs, PDBs, and NetworkPolicies.
-- Consul mesh annotations and service defaults for transparent proxy.
+## Current pipeline
 
-Stateful dependencies such as Kafka, Redis, Cassandra, MinIO, and Postgres should be deployed with dedicated vendor charts or managed services. They are intentionally not embedded in the application chart.
+### Triggers
 
-## CI/CD Flow
+- `pull_request` to any branch: validation jobs.
+- `push` to `main` or `kafka`: validation + image build/scan/sign. `main` additionally deploys lab.
+- `push` tag `v*`: validation + image build/scan/sign for release tag.
+- `workflow_dispatch`: manual run.
 
-1. Pull request opens.
-2. GitHub Actions runs Go tests, frontend tests/build, AI service tests, lint, secret scan, dependency review, CodeQL, Trivy filesystem scan, and Helm lint/template.
-3. Merge to `main` builds images for `api`, `web`, and `ai-service`, publishes to the container registry, generates SBOMs, signs images, and optionally updates staging Helm values.
-4. ArgoCD detects the Git change and syncs staging.
-5. Release tag `v*` builds immutable release images and updates production values through a controlled pull request or manual GitOps promotion.
+### Jobs
 
-## Security Gates
+| Job | Purpose |
+| --- | --- |
+| `test` | Go `make test`, frontend `npm ci`/lint/build, AI service install/ruff/pytest |
+| `helm` | Helm lint, default render, lab 4GB render, upload rendered manifests |
+| `secret-scan` | Gitleaks scan |
+| `dependency-review` | PR-only dependency review |
+| `codeql` | Go, JavaScript/TypeScript, Python CodeQL |
+| `trivy-fs` | Repository filesystem vulnerability scan |
+| `build-images` | Build/push/scan/SBOM/sign `nexuschat-api`, `nexuschat-web`, `nexuschat-ai-service` |
+| `build-proxy-variants` | Build/push lab-specific proxy variant tags for API/web |
+| `deploy-lab-k8s` | Self-hosted runner deploy to `nexuschat-lab` with Helm and verify rollouts |
 
-- Secret scanning: Gitleaks.
-- Dependency review: GitHub dependency review for pull requests.
-- Static analysis: CodeQL for Go, JavaScript/TypeScript, and Python.
-- Container and filesystem scanning: Trivy.
-- SBOM: Syft SPDX JSON artifacts.
-- Image signing: Cosign keyless signing through GitHub OIDC.
-- Kubernetes policy validation: Conftest/Kyverno or admission controller in cluster.
-- Runtime security: least privilege security contexts, NetworkPolicy, Consul intentions, and ingress rate limiting.
+## Image and tag model
 
-## Observability
+Primary images:
 
-- Metrics: Prometheus Operator scrapes `/metrics` on port `8080` for Go services and `/metrics` on `8090` for AI service.
-- Dashboards: Grafana loads application, ingress, Consul, Kubernetes, and dependency dashboards.
-- Alerts: SLO burn rate, pod crash loops, high latency, elevated 5xx, queue lag, Cassandra errors, Redis errors, and AI provider failures.
-- Traces: services emit OTLP traces; production should route OTLP to a supported collector before long-term storage.
-- Logs: Filebeat or Elastic Agent ships container logs to Elasticsearch. Kibana owns search and operational views.
+- `docker.io/tuananh165/nexuschat-api:<tag>`
+- `docker.io/tuananh165/nexuschat-web:<tag>`
+- `docker.io/tuananh165/nexuschat-ai-service:<tag>`
 
-## GitOps Operating Rules
+Additional lab/proxy variants:
 
-- Cluster state is changed by Git commits and ArgoCD syncs, not by manual `kubectl apply` in production.
-- Emergency hotfixes must be backfilled into Git within the same incident.
-- Application chart changes must pass Helm lint/template in CI.
-- Platform chart values must be reviewed by DevSecOps owners before merge.
-- Production ArgoCD apps must use immutable image tags and restricted sync windows.
+- `docker.io/tuananh165/nexuschat-api:proxy-upload`
+- `docker.io/tuananh165/nexuschat-api:proxy-upload-<tag>`
+- `docker.io/tuananh165/nexuschat-web:proxy-upload`
+- `docker.io/tuananh165/nexuschat-web:proxy-upload-<tag>`
+- `docker.io/tuananh165/nexuschat-web:proxy-upload-v2`
+- `docker.io/tuananh165/nexuschat-web:proxy-upload-v2-<tag>`
 
-## Rollout Checklist
+Tag is `GITHUB_SHA` for branch pushes and `GITHUB_REF_NAME` for tags. Docker metadata action also creates `sha-*` metadata tags for primary images.
 
-1. Create namespaces: `argocd`, `ingress-nginx`, `consul`, `monitoring`, `logging`, `security`, `nexuschat-staging`, `nexuschat-prod`.
-2. Install platform components using the values in `deployments/platform`.
-3. Configure DNS and TLS issuer for the Nginx ingress controller.
-4. Configure image registry credentials and External Secrets or Sealed Secrets.
-5. Register ArgoCD applications from `deployments/gitops/applications`.
-6. Verify Prometheus targets, Grafana dashboards, Kibana indexes, Consul services, and Nginx routes.
-7. Run staging smoke tests before production promotion.
+## Lab deployment detail
 
-## Production Readiness Definition
+The `deploy-lab-k8s` job runs only for `push` to `main` on a self-hosted runner with labels:
 
-- CI passes all tests and security gates.
-- Images are immutable, signed, scanned, and have SBOM artifacts.
-- Helm manifests render successfully for the target environment.
-- Ingress TLS, authentication-sensitive cookies, and CORS settings match the environment domain.
-- Secrets are injected from approved secret storage.
-- Service mesh intentions allow only required service-to-service paths.
-- Prometheus alerts and dashboards are active before traffic cutover.
-- Rollback command and previous image tags are documented for the release.
+```text
+[self-hosted, linux, x64, k3s-lab]
+```
+
+It:
+
+1. Checks out source.
+2. Sets `TAG=${GITHUB_SHA}`.
+3. Installs/sets up kubectl and Helm.
+4. Writes `~/.kube/config` from `KUBE_CONFIG_B64` if the secret is provided; otherwise uses the runner's existing kubeconfig.
+5. Prints current cluster context/server and nodes.
+6. Ensures namespace `nexuschat-lab` exists.
+7. Runs `helm upgrade --install nexuschat ... --wait --timeout 10m` with base values plus `values-lab-4gb.yaml`.
+8. Overrides `imageDefaults.tag` to the SHA.
+9. Overrides `web` and `uploader` to SHA-specific proxy variant images.
+10. Waits for deployments `web`, `chat`, `match`, `user`, `uploader`, `forwarder`, `ai-service`.
+11. Prints actual images from live Deployments.
+
+## Required secrets
+
+| Secret | Used by | Required |
+| --- | --- | --- |
+| `DOCKER_USERNAME` | Docker Hub login | yes |
+| `DOCKER_PASSWORD` | Docker Hub login | yes |
+| `KUBE_CONFIG_B64` | Lab deploy kubeconfig | required unless self-hosted runner already has kubeconfig |
+
+Create kubeconfig secret from a machine that can manage the target cluster:
+
+```bash
+base64 -w0 ~/.kube/config
+```
+
+If using GitHub-hosted runners, the Kubernetes API must be reachable from GitHub. Current workflow uses self-hosted lab runner, which is the preferred path for private/LAN K3s.
+
+## Runtime secret model
+
+The app chart defaults to `global.envFromSecrets: [nexuschat-runtime]`. Create this secret in each application namespace outside Git.
+
+Required or commonly required keys:
+
+- `CHAT_JWT_SECRET`
+- `REDIS_PASSWORD`
+- `CASSANDRA_USER`
+- `CASSANDRA_PASSWORD`
+- `UPLOADER_S3_ACCESSKEY`
+- `UPLOADER_S3_SECRETKEY`
+- `USER_OAUTH_GOOGLE_CLIENTID`
+- `USER_OAUTH_GOOGLE_CLIENTSECRET`
+- `DATABASE_URL`
+- `AI_ENDPOINT`
+- `AI_API_KEY`
+- `AI_MODEL`
+- `AI_POSTGRES_PASSWORD`
+
+## Security baseline
+
+Repository/build controls:
+
+- Branch protection on `main`.
+- Required PR reviews for application/deployment changes.
+- Gitleaks secret scan.
+- Dependency review on PRs.
+- CodeQL for Go, TypeScript/JavaScript, Python.
+- Trivy filesystem and image scans.
+- SPDX JSON SBOM artifacts.
+- Cosign keyless image signing with GitHub OIDC.
+
+Runtime controls in chart:
+
+- Non-root pod/container security context.
+- No privilege escalation.
+- Drop all capabilities.
+- Read-only root filesystem.
+- Requests/limits per container.
+- Optional NetworkPolicy and Kyverno policies.
+- TLS at ingress for non-lab domains.
+
+## Observability baseline
+
+- Go services expose metrics using configured `OBSERVABILITY_PROMETHEUS_PORT` (default `8080`).
+- `ai-service` exposes `/metrics` on port `8090`.
+- Chart can emit ServiceMonitor resources when Prometheus Operator is installed.
+- Local Compose includes Prometheus and Jaeger.
+- Platform manifests include standalone/kube-prometheus-stack references, Grafana ingress, Prometheus ingress, Jaeger ingress, and optional ELK/ECK manifests.
+
+## Promotion and rollback
+
+Lab auto-deploys every successful push to `main`.
+
+Production should be explicit:
+
+```bash
+export IMAGE_TAG='<approved-sha-or-v-tag>'
+helm upgrade --install nexuschat deployments/helm/nexuschat \
+  --namespace nexuschat-prod \
+  --create-namespace \
+  --values deployments/helm/nexuschat/values.yaml \
+  --set-string imageDefaults.tag="$IMAGE_TAG" \
+  --set-string global.environment=production \
+  --set-string global.domain=nexuschat.click \
+  --wait --timeout 10m
+```
+
+Rollback:
+
+```bash
+helm history nexuschat -n nexuschat-lab
+helm rollback nexuschat <REVISION> -n nexuschat-lab
+```
+
+or redeploy the previous immutable image tag with `helm upgrade --install`.

@@ -50,9 +50,15 @@ func (r *HttpServer) RegisterRoutes() {
 	r.svr.StaticFile("/favicon.ico", "./frontend/out/favicon.ico")
 
 	r.svr.GET("", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
 		c.File("./frontend/out/index.html")
 	})
 	r.svr.GET("/chat", func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
 		c.File("./frontend/out/chat.html")
 	})
 }
