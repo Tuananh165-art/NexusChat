@@ -1,16 +1,16 @@
 # NexusChat DevSecOps Implementation Runbook
 
-Runbook này phản ánh flow hiện tại của repo. Lab deploy dùng GitHub Actions self-hosted runner + Docker Hub + Helm trực tiếp vào K3s. ArgoCD/GitOps là optional/reference, không phải đường deploy lab mặc định.
+This runbook reflects the repository's current flow. Lab deployment uses a GitHub Actions self-hosted runner, Docker Hub, and direct Helm deployment into K3s. ArgoCD/GitOps is optional/reference material, not the default lab deployment path.
 
 ## 1. Repository preparation
 
-1. Bật branch protection cho `main`.
-2. Require workflow `DevSecOps Platform Pipeline` trước khi merge.
-3. Bật GitHub secret scanning/dependency alerts nếu repository plan hỗ trợ.
-4. Tạo Docker Hub access token và lưu vào GitHub Actions secret.
-5. Không commit `.env`, kubeconfig, token, OAuth secret, JWT secret, S3 secret, DB password, AI provider key.
+1. Enable branch protection for `main`.
+2. Require the `DevSecOps Platform Pipeline` workflow before merge.
+3. Enable GitHub secret scanning and dependency alerts if the repository plan supports them.
+4. Create a Docker Hub access token and store it as a GitHub Actions secret.
+5. Do not commit `.env`, kubeconfig, tokens, OAuth secrets, JWT secrets, S3 secrets, database passwords, or AI provider keys.
 
-Required workflow permissions hiện tại:
+Current required workflow permissions:
 
 ```yaml
 contents: read
@@ -21,7 +21,7 @@ actions: read
 
 ## 2. Lab cluster bootstrap: K3s 4GB path
 
-K3s lab nên dùng ingress-nginx, direct Helm, dependency tối giản. Không cài full ELK/Consul/kube-prometheus-stack/ArgoCD trên máy 4GB trừ khi có lý do rõ ràng.
+The K3s lab should use ingress-nginx, direct Helm deployment, and minimal dependencies. Do not install full ELK, Consul, kube-prometheus-stack, or ArgoCD on a 4GB machine unless there is a clear reason.
 
 ```bash
 curl -sfL https://get.k3s.io | sudo INSTALL_K3S_EXEC="--disable traefik --write-kubeconfig-mode 644" sh -
@@ -41,7 +41,7 @@ for ns in ingress-nginx nexuschat-lab redis kafka cassandra minio postgres monit
 done
 ```
 
-Install ingress-nginx nhẹ:
+Install lightweight ingress-nginx:
 
 ```bash
 helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
@@ -57,7 +57,7 @@ kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --ti
 
 ## 3. Stateful dependencies
 
-Application Helm chart không cài Kafka/Redis/Cassandra/MinIO/PostgreSQL. Cài riêng và đảm bảo endpoints khớp `values-lab-4gb.yaml`:
+The application Helm chart does not install Kafka, Redis, Cassandra, MinIO, or PostgreSQL. Install them separately and ensure endpoints match `values-lab-4gb.yaml`:
 
 | Dependency | Expected endpoint in lab values |
 | --- | --- |

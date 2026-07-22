@@ -1,8 +1,8 @@
 # NexusChat K3s Lab Deployment Guide (4GB RAM / 50GB disk)
 
-Tài liệu này là runbook triển khai lab đúng với source hiện tại. Production có thể dùng cùng Helm chart nhưng cần tài nguyên, secrets, TLS, DNS, storage và observability chuẩn hơn.
+This runbook deploys the lab environment represented by the current source. Production can use the same Helm chart, but it needs stronger resource sizing, secrets, TLS, DNS, storage, and observability.
 
-Lab mục tiêu hiện tại:
+Current target lab:
 
 - Server/K3s ingress IP: `192.168.109.131`.
 - Namespace app: `nexuschat-lab`.

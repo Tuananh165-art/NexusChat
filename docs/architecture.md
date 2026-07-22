@@ -1,8 +1,8 @@
 # NexusChat Architecture
 
-## Tổng quan
+## Overview
 
-NexusChat là hệ thống chat realtime dạng microservices. Backend Go build thành một binary `server` với nhiều subcommand; cùng image `nexuschat-api` được chạy với command khác nhau cho từng service. Frontend Next.js được build static và serve bởi Go service `web`. AI được tách thành Python FastAPI service riêng.
+NexusChat is a real-time microservices chat system. The Go backend builds into one `server` binary with multiple subcommands; the same `nexuschat-api` image runs different commands for each service. The Next.js frontend is built as static output and served by the Go `web` service. AI runs as a separate Python FastAPI service.
 
 ## Runtime services
 

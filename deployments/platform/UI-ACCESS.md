@@ -2,7 +2,7 @@
 
 Lab base IP: `192.168.109.131`.
 
-Các URL dùng `nip.io`, không cần sửa `/etc/hosts`: mọi hostname dạng `*.192.168.109.131.nip.io` resolve về `192.168.109.131`.
+These URLs use `nip.io`; no `/etc/hosts` changes are required. Any hostname matching `*.192.168.109.131.nip.io` resolves to `192.168.109.131`.
 
 ## NexusChat app
 
@@ -11,7 +11,7 @@ Các URL dùng `nip.io`, không cần sửa `/etc/hosts`: mọi hostname dạng 
 | Web app by IP | `http://192.168.109.131` |
 | AI health by IP | `http://192.168.109.131/api/ai/health` |
 
-Nếu deploy với domain `nexuschat.click`, app ingress host là domain đó thay vì hostless/IP.
+If deploying with the `nexuschat.click` domain, the app ingress host is that domain instead of a hostless/IP ingress.
 
 ## Platform/dashboard URLs
 

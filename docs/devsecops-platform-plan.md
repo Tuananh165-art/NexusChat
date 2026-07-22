@@ -1,6 +1,6 @@
 # NexusChat DevSecOps Platform Plan
 
-Tài liệu này mô tả baseline DevSecOps hiện tại của source code: GitHub Actions build/test/scan/sign image Docker Hub và deploy lab K3s trực tiếp bằng Helm. ArgoCD/Consul/ELK/kube-prometheus-stack vẫn có manifest tham khảo trong repo nhưng không nằm trên critical path deploy lab hiện tại.
+This document describes the current DevSecOps baseline in source: GitHub Actions build, test, scan, sign Docker Hub images, and deploy the K3s lab directly with Helm. ArgoCD, Consul, ELK, and kube-prometheus-stack still have reference manifests in the repository, but they are not on the current critical lab deployment path.
 
 ## Target architecture
 

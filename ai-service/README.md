@@ -1,6 +1,6 @@
 # NexusChat AI Service
 
-`ai-service` là Python FastAPI microservice độc lập của NexusChat. Service này sở hữu logic AI/provider/prompt/context/agent/workflow/MCP preview và không nhúng trực tiếp vào Go `chat` service. Go `chat` chỉ gọi AI qua HTTP, ví dụ composer rewrite đi qua `/api/chat/ai/rewrite` rồi proxy tới `AI_BASEURL`.
+`ai-service` is NexusChat's independent Python FastAPI microservice. It owns AI/provider/prompt/context/agent/workflow/MCP preview logic and is not embedded directly into the Go `chat` service. Go `chat` calls AI only over HTTP; for example, composer rewrite goes through `/api/chat/ai/rewrite` and then proxies to `AI_BASEURL`.
 
 ## Current stack
 
@@ -16,7 +16,7 @@
 
 ## Source layout
 
-| Path | Vai trò |
+| Path | Role |
 | --- | --- |
 | `app/main.py` | Entrypoint |
 | `app/api/app.py` | FastAPI app factory/router registration |

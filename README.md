@@ -6,13 +6,245 @@
 
 NexusChat is a real-time chat platform built on a microservices architecture. The current source code comprises a Go backend; a Next.js web app (built as static output and served by a Go binary named `web`); a Python FastAPI `ai-service`; Docker Compose for local development; a Helm chart for Kubernetes; and a GitHub Actions workflow that handles building, scanning, signing, and deploying directly to a K3s lab environment.
 
+## Architecture overview
+
+```mermaid
+flowchart TB
+  browser[Browser / Next.js client]
+  ingress[HTTP ingress<br/>Traefik locally / ingress-nginx in K3s]
+
+  subgraph edge[Edge and web tier]
+    web[web<br/>Go server web<br/>serves frontend/out]
+  end
+
+  subgraph go[Go backend: one nexuschat-api image, multiple commands]
+    user[user<br/>HTTP + gRPC<br/>local users, Google OAuth, profile/session lookup]
+    match[match<br/>WebSocket /api/match<br/>random matching orchestration]
+    chat[chat<br/>HTTP + gRPC + WebSocket<br/>channels, messages, roles, search, AI proxy]
+    forwarder[forwarder<br/>gRPC only<br/>active subscriber/session routing]
+    uploader[uploader<br/>HTTP /api/uploader<br/>proxy, presigned, chunked uploads]
+  end
+
+  subgraph ai[Python AI service]
+    aisvc[ai-service<br/>FastAPI on 8090<br/>rewrite, streaming rewrite, agents, MCP preview]
+  end
+
+  subgraph state[Stateful dependencies outside the app Helm chart]
+    redis[(Redis Cluster<br/>online state, cache, matching state)]
+    cassandra[(Cassandra<br/>durable chat data)]
+    kafka[(Kafka<br/>message fanout events)]
+    minio[(MinIO / S3<br/>uploaded object bytes)]
+    postgres[(PostgreSQL<br/>AI state, agents, workflow/audit models)]
+  end
+
+  subgraph external[External systems]
+    google[Google OAuth]
+    provider[OpenAI-compatible AI provider]
+  end
+
+  subgraph obs[Observability]
+    prom[Prometheus metrics]
+    jaeger[OTLP tracing / Jaeger]
+  end
+
+  browser -->|/, /chat, /_next/*| ingress --> web
+  browser -->|/api/user| ingress --> user
+  browser -->|/api/match WebSocket| ingress --> match
+  browser -->|/api/chat HTTP + WebSocket| ingress --> chat
+  browser -->|/api/uploader| ingress --> uploader
+  browser -->|/api/ai via rewrite/strip-prefix| ingress --> aisvc
+
+  match -->|create/join channel| chat
+  match -->|profile/session lookup| user
+  chat -->|subscriber routing| forwarder
+  chat -->|AI rewrite proxy| aisvc
+  uploader -->|channel forward-auth / fallback auth| chat
+
+  user --> redis
+  match --> redis
+  chat --> redis
+  chat --> cassandra
+  chat --> kafka
+  forwarder --> kafka
+  uploader --> minio
+  aisvc --> postgres
+  aisvc --> redis
+
+  user --> google
+  aisvc --> provider
+
+  web -. metrics/traces .-> prom
+  user -. metrics/traces .-> prom
+  match -. metrics/traces .-> prom
+  chat -. metrics/traces .-> prom
+  forwarder -. metrics/traces .-> prom
+  uploader -. metrics/traces .-> prom
+  aisvc -. metrics .-> prom
+  web -. traces .-> jaeger
+  chat -. traces .-> jaeger
+  aisvc -. traces .-> jaeger
+```
+
+### Runtime sequence: sign in, match, chat, upload, and AI rewrite
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor U as User browser
+  participant W as web
+  participant US as user service
+  participant M as match service
+  participant C as chat service
+  participant F as forwarder service
+  participant UP as uploader service
+  participant AI as ai-service
+  participant R as Redis Cluster
+  participant K as Kafka
+  participant DB as Cassandra
+  participant S3 as MinIO/S3
+  participant P as AI provider
+
+  U->>W: GET / or /chat
+  W-->>U: Static Next.js page and assets
+  U->>US: Create local user or start Google OAuth
+  US->>R: Store/load user session/profile state
+  US-->>U: User profile, cookies, access data
+
+  U->>M: Open WebSocket /api/match
+  M->>R: Register waiting user / matching state
+  M->>US: Validate session/profile through gRPC
+  M->>C: Create or resolve channel membership
+  C->>DB: Persist channel and membership data
+  M-->>U: Match result with channel data
+
+  U->>C: Open WebSocket /api/chat?uid=...&access_token=...
+  C->>R: Track online user/session cache
+  U->>C: Send message event
+  C->>DB: Persist message, reactions, pins, and channel state
+  C->>K: Publish channel fanout event
+  K-->>F: Consume fanout event
+  F-->>C: Route event to active subscribers
+  C-->>U: Broadcast realtime message/action event
+
+  U->>UP: POST /api/uploader/upload/proxy or chunked upload APIs
+  UP->>C: Authorize channel access when needed
+  UP->>S3: Store object bytes or create presigned URLs
+  UP-->>U: File metadata, object key, or presigned URL
+
+  U->>C: POST /api/chat/ai/rewrite
+  C->>AI: Forward rewrite request with channel context
+  AI->>P: OpenAI-compatible completion request
+  P-->>AI: Rewritten text / streamed deltas
+  AI-->>C: Rewrite response
+  C-->>U: Composer-ready rewritten text
+```
+
+### CI/CD and deployment workflow
+
+```mermaid
+flowchart LR
+  dev[Developer push / pull request] --> trigger{GitHub Actions trigger}
+  trigger -->|pull_request| validation[Validation only]
+  trigger -->|push main, kafka, or v* tag| release[Validation + image release]
+  trigger -->|workflow_dispatch| manual[Manual pipeline run]
+
+  validation --> gotest[Go make test]
+  validation --> frontend[Frontend npm ci + typecheck/lint + build]
+  validation --> aitest[AI service install + ruff + pytest]
+  validation --> helm[Helm lint + default/lab template]
+  validation --> security[Gitleaks + dependency review + CodeQL + Trivy FS]
+
+  release --> build[Build Docker images]
+  build --> apiimg["nexuschat-api:&lt;tag&gt;"]
+  build --> webimg["nexuschat-web:&lt;tag&gt;"]
+  build --> aiimg["nexuschat-ai-service:&lt;tag&gt;"]
+  build --> proxy["Proxy/lab variants<br/>api:proxy-upload-*<br/>web:proxy-upload-*<br/>web:proxy-upload-v2-*"]
+
+  apiimg --> scan[Image Trivy scan]
+  webimg --> scan
+  aiimg --> scan
+  proxy --> scan
+  scan --> sbom[Generate SBOM]
+  sbom --> sign[Cosign keyless signing]
+  sign --> hub[(Docker Hub<br/>docker.io/tuananh165)]
+
+  hub --> deploy{Branch is main?}
+  deploy -->|no| done[Images published only]
+  deploy -->|yes| runner[Self-hosted runner<br/>labels: self-hosted, linux, x64, k3s-lab]
+  runner --> kubeconfig[Use KUBE_CONFIG_B64<br/>or existing runner kubeconfig]
+  kubeconfig --> helmdeploy[helm upgrade --install nexuschat<br/>namespace nexuschat-lab<br/>values.yaml + values-lab-4gb.yaml]
+  helmdeploy --> rollout[Wait for web, chat, match, user,<br/>uploader, forwarder, ai-service]
+  rollout --> smoke[Print live images and run smoke checks]
+```
+
+### Kubernetes deployment topology
+
+```mermaid
+flowchart TB
+  subgraph cluster[K3s lab cluster]
+    nginx[ingress-nginx]
+
+    subgraph ns[nexuschat-lab namespace]
+      rel[Helm release: nexuschat]
+      webd[Deployment/Service: web]
+      chatd[Deployment/Service: chat]
+      matchd[Deployment/Service: match]
+      userd[Deployment/Service: user]
+      uploadd[Deployment/Service: uploader]
+      forwarderd[Deployment/Service: forwarder]
+      aid[Deployment/Service: ai-service]
+      secret[nexuschat-runtime Secret]
+    end
+
+    subgraph deps[Separate dependency namespaces]
+      redisns[redis: Redis Cluster]
+      kafkans[kafka: Kafka]
+      cassns[cassandra: Cassandra + schema]
+      minions[minio: bucket myfilebucket]
+      pgns[postgres: AI PostgreSQL]
+    end
+  end
+
+  nginx -->|/, /chat, /_next| webd
+  nginx -->|/api/user| userd
+  nginx -->|/api/match| matchd
+  nginx -->|/api/chat| chatd
+  nginx -->|/api/uploader| uploadd
+  nginx -->|/api/ai with rewrite target /$2| aid
+
+  rel --> webd
+  rel --> chatd
+  rel --> matchd
+  rel --> userd
+  rel --> uploadd
+  rel --> forwarderd
+  rel --> aid
+  secret -. envFrom .-> webd
+  secret -. envFrom .-> chatd
+  secret -. envFrom .-> matchd
+  secret -. envFrom .-> userd
+  secret -. envFrom .-> uploadd
+  secret -. envFrom .-> forwarderd
+  secret -. envFrom .-> aid
+
+  chatd --> cassns
+  chatd --> redisns
+  chatd --> kafkans
+  matchd --> redisns
+  userd --> redisns
+  forwarderd --> kafkans
+  uploadd --> minions
+  aid --> pgns
+  aid --> redisns
+```
+
 ## Components in the repository
 
 | Area | Path | Role |
 | --- | --- | --- |
-| Go services | `cmd/`, `pkg/`, `internal/wire/`, `proto/` | CLI `server` với subcommand `web`, `chat`, `match`, `user`, `uploader`, `forwarder`; HTTP/gRPC/WebSocket; Wire DI |
-| Frontend | `frontend/` | Next.js 15 + React 19 + TypeScript chat UI, static export được serve từ `frontend/out` bởi Go `web` |
-| AI service | `ai-service/` | FastAPI service cho rewrite, streaming rewrite, agent CRUD, workflow draft, MCP preview, metrics, PostgreSQL/Alembic |
+| Go services | `cmd/`, `pkg/`, `internal/wire/`, `proto/` | CLI `server` with `web`, `chat`, `match`, `user`, `uploader`, and `forwarder` subcommands; HTTP/gRPC/WebSocket; Wire DI |
+| Frontend | `frontend/` | Next.js 15 + React 19 + TypeScript chat UI; static export served from `frontend/out` by Go `web` |
+| AI service | `ai-service/` | FastAPI service for rewrite, streaming rewrite, agent CRUD, workflow drafts, MCP preview, metrics, and PostgreSQL/Alembic |
 | Local runtime | `docker-compose.yaml`, `build/`, `ai-service/Dockerfile` | Traefik, Go images, web image, AI image, Kafka, Redis Cluster, Cassandra, MinIO, Postgres, Prometheus, Jaeger |
 | Kubernetes app | `deployments/helm/nexuschat` | Helm chart deploy 7 stateless NexusChat services, Service, Ingress, HPA, PDB, ServiceMonitor, NetworkPolicy, ServiceAccount, optional Traefik Middleware |
 | Lab profile | `deployments/helm/nexuschat/values-lab-4gb.yaml` | K3s lab 4GB RAM/50GB disk: 1 replica, Recreate rollout, no Consul, no ServiceMonitor, no NetworkPolicy |
@@ -227,7 +459,7 @@ Do not commit `.env`, kubeconfig, OAuth secrets, JWT secrets, S3 credentials, da
 - `docs/README.md`: engineering docs index.
 - `docs/architecture.md`: source-accurate architecture and service boundaries.
 - `docs/deploy-k8s-guide.md`: K3s lab deployment and CI/CD operations runbook.
-- `docs/dockerhub-argocd-rollout-vi.md`: Vietnamese CI/CD quick guide for Docker Hub + direct K8s lab rollout.
+- `docs/dockerhub-direct-k8s-rollout.md`: CI/CD quick guide for Docker Hub + direct K8s lab rollout.
 - `docs/devsecops-platform-plan.md`: current DevSecOps architecture.
 - `docs/devsecops-implementation-runbook.md`: implementation and operations runbook.
 - `ai-service/README.md`: AI service setup and API.
