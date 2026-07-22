@@ -277,40 +277,124 @@ flowchart TB
 - AI service direct endpoints: `/health`, `/ready`, `/metrics`, `/v1/assistant/rewrite`, `/v1/assistant/rewrite/stream`, `/v1/agents`, `/v1/mcp/tools`, `/v1/mcp/tools/preview`.
 - Prometheus metrics on Go services and AI service; OTLP tracing hooks to Jaeger/collector.
 
-## Tech stack
+## Tech stack and why it is used
 
-| Layer | Current stack |
-| --- | --- |
-| Backend | Go 1.24, Cobra, Wire, Gin, gRPC, Protobuf, go-redis v9 cluster client, gocql, Sarama/Watermill, AWS SDK S3, Prometheus, OpenTelemetry |
-| Frontend | Next.js 15.3, React 19.1, TypeScript 5.8, Tailwind CSS 4, Framer Motion, lucide-react |
-| AI | Python 3.12, FastAPI, Uvicorn, Pydantic v2, Pydantic Settings, httpx, SQLAlchemy async, Alembic, asyncpg, redis-py, Tenacity, prometheus-client, OpenTelemetry |
-| Local infra | Docker Compose, Traefik v3.3, Kafka 7.6.0, Redis Cluster 8.2.1, Cassandra 4.0, MinIO, PostgreSQL 16, Prometheus, Jaeger |
-| Kubernetes | K3s lab, Helm 3, ingress-nginx for lab/prod app ingress, optional Traefik Middleware only when enabled for uploader forward-auth |
-| CI/CD/Security | GitHub Actions, Docker Hub, Trivy FS/image scans, Gitleaks, dependency review, CodeQL, Syft/Anchore SBOM, Cosign keyless signing, optional Kyverno |
+| Layer | Technology | How it is used in this project | Problem it solves |
+| --- | --- | --- | --- |
+| Backend runtime | Go 1.24 | Builds one `server` binary with Cobra subcommands for `web`, `chat`, `match`, `user`, `uploader`, and `forwarder`. | Keeps service binaries small, fast, and easy to deploy while allowing each service to run as an isolated process/container command. |
+| HTTP APIs | Gin | Implements public REST-style APIs for user, chat, uploader, and service health/swagger endpoints. | Provides lightweight routing, middleware, request binding, and response handling for latency-sensitive APIs. |
+| gRPC + Protobuf | `google.golang.org/grpc`, generated proto packages | Internal service-to-service calls for user/session lookup, channel creation, and forwarder routing. | Avoids brittle direct database coupling between microservices and gives typed internal contracts. |
+| Dependency injection | Google Wire | Generates `internal/wire/wire_gen.go` from provider sets. | Makes service construction explicit and testable without runtime reflection containers. |
+| Realtime transport | WebSocket through Gin/Melody | `/api/match` coordinates random matching; `/api/chat` carries realtime chat events. | Solves bidirectional low-latency messaging that normal request/response HTTP cannot handle efficiently. |
+| Event fanout | Kafka + Sarama/Watermill | Chat publishes message/action events; `forwarder` routes active subscriber sessions. | Decouples message persistence from realtime delivery and enables scalable fanout across service instances. |
+| Online/cache/matching state | Redis Cluster | Stores online/session/cache/matching state and short-lived coordination data. | Keeps ephemeral high-write state out of durable databases and supports horizontal service scaling. |
+| Durable chat storage | Cassandra | Stores channel/message-oriented chat data. | Handles high-volume append/read chat workloads with partition-friendly storage. |
+| Object storage | MinIO/S3-compatible API + AWS SDK v2 | Stores uploaded object bytes; uploader supports proxy upload, presigned upload/download, and multipart flows. | Separates large binary payloads from chat metadata and supports both local MinIO and production S3-compatible storage. |
+| Frontend | Next.js 15, React 19, TypeScript, Tailwind CSS 4 | Builds the chat UI as a static export under `frontend/out`; Go `web` serves it in containers. | Gives a typed, modern UI while keeping production serving simple: static files behind the same ingress. |
+| AI service | Python 3.12, FastAPI, Pydantic v2, httpx | Implements `/v1/assistant/rewrite`, streaming rewrite, agents, workflow draft foundations, MCP preview, health, readiness, and metrics. | Keeps AI/provider/prompt/tooling iteration independent from the Go chat domain and avoids mixing provider-specific logic into the core chat service. |
+| AI persistence | PostgreSQL, SQLAlchemy async, Alembic | Stores AI service state such as agents, AI requests/responses, workflow/audit/settings/memory model foundations. | Gives relational consistency and migrations for AI metadata without affecting chat Cassandra schemas. |
+| Observability | Prometheus metrics, OpenTelemetry, Jaeger | Go services expose metrics/tracing hooks; AI service exposes `/metrics`; local Compose includes Prometheus and Jaeger. | Makes service health, latency, and distributed request paths inspectable during development and deployment. |
+| Local orchestration | Docker Compose + Traefik | Runs web, Go services, AI service, Kafka, Redis Cluster, Cassandra, MinIO, Postgres, Prometheus, and Jaeger locally. | Reproduces the multi-service runtime on one developer machine with a single command. |
+| Kubernetes deployment | Helm, K3s lab, ingress-nginx | Helm chart deploys stateless app services; stateful dependencies are installed separately; lab values tune resources for a small cluster. | Provides repeatable deployment manifests while keeping heavy stateful systems outside the app release. |
+| CI/CD and supply chain | GitHub Actions, Docker Hub, Trivy, Gitleaks, CodeQL, Syft/Anchore SBOM, Cosign | Validates code, builds images, scans filesystem/images, creates SBOMs, signs images, and deploys `main` to the K3s lab. | Catches defects/secrets/vulnerabilities before deployment and publishes traceable immutable images. |
 
-## Local development
+## Problems addressed by this solution
 
-Prerequisites: Docker Engine + Compose v2, Go 1.24, Node.js 20, Python 3.12, and real OAuth/AI provider settings when testing those flows.
+NexusChat is designed around common problems in realtime messaging systems:
 
-Copy env examples and fill real values locally only:
+1. Realtime communication must be low-latency and bidirectional.
+   - WebSocket endpoints keep chat and random matching interactive without polling.
+   - Kafka and the `forwarder` service decouple message ingestion from active subscriber routing.
+
+2. Chat data, online state, file bytes, and AI metadata have different storage requirements.
+   - Cassandra stores durable chat/channel data.
+   - Redis Cluster stores short-lived online, cache, session, and matching state.
+   - MinIO/S3 stores uploaded objects outside message records.
+   - PostgreSQL stores AI service metadata and migration-managed relational state.
+
+3. Microservices should not share each other's storage schema.
+   - Service boundaries are enforced through HTTP/gRPC contracts and events.
+   - `chat`, `match`, `user`, `uploader`, `forwarder`, and `ai-service` each own their responsibility and communicate through explicit APIs.
+
+4. Browser upload flows need to work in local labs and Kubernetes.
+   - The uploader supports proxy upload for small files to avoid client-side DNS/public endpoint issues with MinIO.
+   - Presigned and multipart upload paths remain available for larger objects and production-style object storage flows.
+
+5. AI features should evolve independently from the core chat system.
+   - Go `chat` exposes a stable proxy endpoint, `/api/chat/ai/rewrite`.
+   - Python `ai-service` owns prompts, provider calls, streaming, agent/workflow/MCP preview logic, and AI persistence.
+
+6. Local development and lab deployment should be close to production without requiring a large cluster.
+   - Docker Compose runs the full local stack.
+   - Helm values separate default/staging-like settings from the constrained `values-lab-4gb.yaml` profile.
+   - Optional platform manifests are kept out of the critical small-lab deployment path.
+
+7. Release artifacts need repeatability and supply-chain visibility.
+   - GitHub Actions validates Go, frontend, AI service, Helm, secrets, and security scans.
+   - Docker images are tagged immutably, scanned, accompanied by SBOMs, and signed with Cosign.
+
+## Prerequisites
+
+Install these before building or running the whole project locally:
+
+| Tool | Required for | Notes |
+| --- | --- | --- |
+| Docker Engine + Compose v2 | Full local stack and Docker image builds | `docker compose version` should work. |
+| Go 1.24 | Go services, `make test`, `make build` | `make build` installs Wire and Swag CLI tools into `$(go env GOPATH)/bin`. |
+| Node.js 20+ and npm | Frontend install, typecheck, and static export build | CI currently uses Node 20. |
+| Python 3.12+ with `venv`/`pip` | AI service lint/test/run | On Debian/Ubuntu install `python3.12-venv` if `python3 -m venv` fails. |
+| Helm 3 | Kubernetes chart validation/deployment | Needed for `helm lint`, `helm template`, and `helm upgrade`. |
+| kubectl | Kubernetes deployment/verification | Required only for cluster operations. |
+
+Do not commit real `.env`, kubeconfig, OAuth secrets, JWT secrets, S3 credentials, database passwords, or AI provider keys.
+
+## Environment setup
+
+Copy example environment files and fill local values only:
 
 ```bash
 cp .env.example .env
 cp ai-service/.env.example ai-service/.env
 ```
 
-Start full local stack:
+Minimum local `.env` values used by `docker-compose.yaml` include:
+
+```bash
+JWT_SECRET='local-jwt-secret-change-me'
+REDIS_PASSWORD='local-redis-pass'
+USER_OAUTH_GOOGLE_CLIENTID='replace-me'
+USER_OAUTH_GOOGLE_CLIENTSECRET='replace-me'
+```
+
+Minimum `ai-service/.env` values for real provider-backed AI behavior include:
+
+```bash
+AI_ENDPOINT='https://your-openai-compatible-endpoint/v1'
+AI_API_KEY='replace-me'
+AI_MODEL='replace-me'
+DATABASE_URL='postgresql+asyncpg://nexuschat_ai:nexuschat_ai@ai-postgres:5432/nexuschat_ai'
+REDIS_URL='redis://redis-node-0:6379/0'
+CHAT_SERVICE_BASE_URL='http://random-chat/api/chat'
+```
+
+Placeholders are enough to boot some services, but OAuth and AI provider-backed features require real values.
+
+## Build, run, test, and deploy
+
+### 1. Run the full local stack with Docker Compose
+
+This is the easiest way to run the complete system with all dependencies:
 
 ```bash
 docker compose up --build -d
 docker compose ps
 ```
 
-Common local URLs:
+Common local endpoints:
 
 | URL | Service |
 | --- | --- |
-| `http://localhost` | Web app |
+| `http://localhost` | Web app served through Traefik |
 | `http://localhost:8080` | Traefik dashboard |
 | `http://localhost:9001` | MinIO console |
 | `http://localhost:9090` | Prometheus |
@@ -319,98 +403,277 @@ Common local URLs:
 | `http://localhost/api/match/swagger/index.html` | Match Swagger |
 | `http://localhost/api/chat/swagger/index.html` | Chat Swagger |
 | `http://localhost/api/uploader/swagger/index.html` | Uploader Swagger |
+| `http://localhost/api/ai/health` | AI service health through Traefik strip-prefix routing |
 
-Useful checks:
+Useful local checks:
 
 ```bash
 docker compose logs -f random-chat
 docker compose logs -f ai-service
 curl -I http://localhost
-curl http://localhost/api/ai/health
+curl -i http://localhost/api/ai/health
 ```
 
-## Development commands
+Stop or reset the local stack:
+
+```bash
+docker compose down
+# Remove volumes only when you intentionally want to delete local Kafka/Redis/Cassandra/MinIO/Postgres data:
+docker compose down -v
+```
+
+### 2. Build and test Go backend services
+
+Run the canonical Go test target:
 
 ```bash
 make test
-go test ./...
-make build
-
-npm --prefix frontend ci
-npm --prefix frontend run lint
-npm --prefix frontend run build
-
-cd ai-service
-python -m pip install -e ".[dev]"
-python -m ruff check .
-python -m pytest
-python -m uvicorn app.main:app --reload
 ```
 
-Generated Swagger docs for Go services:
+Run direct Go tests without the Makefile coverage flags:
 
 ```bash
-make doc
+go test ./...
 ```
 
-## Kubernetes deployment model
+Build the production Go binary:
 
-The source of truth for the app release is `deployments/helm/nexuschat`.
+```bash
+make build
+./server --help
+```
 
-The chart deploys these services: `web`, `chat`, `match`, `user`, `uploader`, `forwarder`, `ai-service`.
+`make build` runs dependency generation first:
 
-The chart does not deploy Kafka, Redis, Cassandra, MinIO, or PostgreSQL. Install those separately through managed services, vendor charts, or the lab commands in `docs/deploy-k8s-guide.md`, then point Helm values to their service endpoints.
+```bash
+make dep   # installs/runs Wire for internal/wire
+make doc   # regenerates Swagger docs for chat, match, uploader, user
+```
 
-Important chart facts from current source:
+Run individual Go services locally after building the binary. They still need their runtime dependencies and environment variables:
 
-- Default namespace/profile is staging-like and uses `global.domain: nexuschat.example.com` plus TLS secret `nexuschat-tls`.
-- Default ingress class is `nginx`.
-- `values-lab-4gb.yaml` overrides the lab to `global.domain: ""`, disables TLS redirect, disables Consul/ServiceMonitor/NetworkPolicy, and keeps one replica per service.
-- Default image registry is `docker.io/tuananh165`.
-- `imageDefaults.tag` controls `nexuschat-api`, `nexuschat-web`, and `nexuschat-ai-service` unless a service sets `services.<name>.image.fullname`.
-- Lab currently overrides `web` to `docker.io/tuananh165/nexuschat-web:proxy-upload-v2` and `uploader` to `docker.io/tuananh165/nexuschat-api:proxy-upload`; the CI deploy job pins those two to SHA-specific proxy variant tags.
-- Deployments and Services are named exactly `web`, `chat`, `match`, `user`, `uploader`, `forwarder`, `ai-service`.
+```bash
+./server web
+./server user
+./server match
+./server chat
+./server uploader
+./server forwarder
+```
 
-Validate chart locally when Helm is installed:
+Build Docker images manually:
+
+```bash
+make docker-api
+make docker-web
+# or both:
+make docker
+```
+
+The Makefile tags those local images as:
+
+```text
+tuananh165/nexuschat-api:kafka
+tuananh165/nexuschat-web:kafka
+```
+
+### 3. Build, run, and test the frontend
+
+Install dependencies:
+
+```bash
+npm --prefix frontend ci
+```
+
+Run the development server:
+
+```bash
+npm --prefix frontend run dev
+```
+
+Typecheck/lint and build static output:
+
+```bash
+npm --prefix frontend run lint
+npm --prefix frontend run build
+```
+
+The Next.js build exports static files to `frontend/out`. The Go `web` service and `build/Dockerfile.web` serve that static output in production-style containers.
+
+### 4. Build, run, and test the AI service
+
+Create an isolated Python environment:
+
+```bash
+cd ai-service
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e ".[dev]"
+```
+
+Run lint and tests:
+
+```bash
+python -m ruff check .
+python -m pytest
+# or via the AI service Makefile:
+make lint
+make test
+```
+
+Run database migrations and start the service:
+
+```bash
+python -m alembic upgrade head
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8090 --reload
+# or:
+make run
+```
+
+Direct AI service smoke tests:
+
+```bash
+curl -i http://localhost:8090/health
+curl -X POST http://localhost:8090/v1/assistant/rewrite \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"hello, please rewrite this message","tone":"professional","locale":"English"}'
+```
+
+Through Docker Compose and Traefik:
+
+```bash
+curl -i http://localhost/api/ai/health
+curl -X POST http://localhost/api/ai/v1/assistant/rewrite \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"hello, please rewrite this message","tone":"professional","locale":"English"}'
+```
+
+### 5. Validate Kubernetes manifests locally
+
+The application Helm chart is under `deployments/helm/nexuschat`.
 
 ```bash
 helm lint deployments/helm/nexuschat
-helm template nexuschat deployments/helm/nexuschat --namespace nexuschat-staging > /tmp/nexuschat.yaml
-helm template nexuschat deployments/helm/nexuschat --namespace nexuschat-lab \
+helm template nexuschat deployments/helm/nexuschat \
+  --namespace nexuschat-staging > /tmp/nexuschat.yaml
+helm template nexuschat deployments/helm/nexuschat \
+  --namespace nexuschat-lab \
   --values deployments/helm/nexuschat/values.yaml \
   --values deployments/helm/nexuschat/values-lab-4gb.yaml > /tmp/nexuschat-lab.yaml
 ```
 
-## CI/CD pipeline: GitHub Actions -> Docker Hub -> K3s lab
+The chart deploys only stateless NexusChat application services. It does not install Kafka, Redis, Cassandra, MinIO/S3, PostgreSQL, ingress-nginx, cert-manager, Prometheus/Grafana, ELK, Consul, or ArgoCD. Install those separately or use managed services, then point Helm values to the correct endpoints.
+
+### 6. Deploy to a K3s lab manually with existing images
+
+Target lab defaults documented in this repository:
+
+| Setting | Value |
+| --- | --- |
+| Namespace | `nexuschat-lab` |
+| Helm release | `nexuschat` |
+| Chart | `deployments/helm/nexuschat` |
+| Lab values | `deployments/helm/nexuschat/values-lab-4gb.yaml` |
+| Ingress controller | ingress-nginx |
+| Lab IP | `192.168.109.131` |
+
+Create or update the runtime secret before deploying. Use real values for OAuth and AI features:
+
+```bash
+kubectl create namespace nexuschat-lab --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl create secret generic nexuschat-runtime \
+  --namespace nexuschat-lab \
+  --from-literal=CHAT_JWT_SECRET='change-me' \
+  --from-literal=REDIS_PASSWORD="$REDIS_PASSWORD" \
+  --from-literal=CASSANDRA_USER='admin' \
+  --from-literal=CASSANDRA_PASSWORD="$CASSANDRA_PASSWORD" \
+  --from-literal=UPLOADER_S3_ACCESSKEY="$MINIO_ACCESS_KEY" \
+  --from-literal=UPLOADER_S3_SECRETKEY="$MINIO_SECRET_KEY" \
+  --from-literal=USER_OAUTH_GOOGLE_CLIENTID="$GOOGLE_CLIENT_ID" \
+  --from-literal=USER_OAUTH_GOOGLE_CLIENTSECRET="$GOOGLE_CLIENT_SECRET" \
+  --from-literal=DATABASE_URL="$DATABASE_URL" \
+  --from-literal=AI_ENDPOINT="$AI_ENDPOINT" \
+  --from-literal=AI_API_KEY="$AI_API_KEY" \
+  --from-literal=AI_MODEL="$AI_MODEL" \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Deploy a known image tag:
+
+```bash
+export TAG='<existing-git-sha-or-release-tag>'
+helm upgrade --install nexuschat deployments/helm/nexuschat \
+  --namespace nexuschat-lab \
+  --create-namespace \
+  --values deployments/helm/nexuschat/values.yaml \
+  --values deployments/helm/nexuschat/values-lab-4gb.yaml \
+  --set-string imageDefaults.tag="$TAG" \
+  --set-string services.web.image.fullname="docker.io/tuananh165/nexuschat-web:proxy-upload-v2-$TAG" \
+  --set-string services.uploader.image.fullname="docker.io/tuananh165/nexuschat-api:proxy-upload-$TAG" \
+  --wait --timeout 10m
+```
+
+If the selected tag does not have the proxy variant images, remove the two `services.*.image.fullname` overrides or set them to image tags that exist.
+
+Verify rollout:
+
+```bash
+kubectl -n nexuschat-lab get pods -o wide
+kubectl -n nexuschat-lab get svc
+kubectl -n nexuschat-lab get ingress
+kubectl -n nexuschat-lab get deploy -o jsonpath='{range .items[*]}{.metadata.name}{" => "}{range .spec.template.spec.containers[*]}{.image}{" "}{end}{"\n"}{end}'
+
+for deploy in web chat match user uploader forwarder ai-service; do
+  kubectl -n nexuschat-lab rollout status deployment/$deploy --timeout=600s
+done
+
+curl -I http://192.168.109.131
+curl -i http://192.168.109.131/api/ai/health
+```
+
+Rollback:
+
+```bash
+helm history nexuschat -n nexuschat-lab
+helm rollback nexuschat <REVISION> -n nexuschat-lab
+for deploy in web chat match user uploader forwarder ai-service; do
+  kubectl -n nexuschat-lab rollout status deployment/$deploy --timeout=600s
+done
+```
+
+### 7. Deploy through GitHub Actions CI/CD
 
 Primary workflow: `.github/workflows/devsecops-platform.yml`.
 
 Triggers:
 
-- `pull_request` to any branch: validation only.
-- `push` to `main` or `kafka`, and `v*` tags: build/scan/sign images.
-- `push` to `main`: deploy to K3s lab through the self-hosted runner labels `[self-hosted, linux, x64, k3s-lab]`.
-- `workflow_dispatch`: manual run.
-
-Jobs:
-
-1. `test`: `make test`, `npm ci`, frontend lint/build, AI service install/ruff/pytest.
-2. `helm`: `helm lint`, default render, lab 4GB render, upload rendered manifests.
-3. `secret-scan`: Gitleaks.
-4. `dependency-review`: PR-only dependency review with high severity threshold.
-5. `codeql`: Go, JavaScript/TypeScript, Python analysis.
-6. `trivy-fs`: repo filesystem scan and SARIF upload.
-7. `build-images`: build/push/Trivy-scan/SBOM/sign `nexuschat-api`, `nexuschat-web`, `nexuschat-ai-service` to Docker Hub.
-8. `build-proxy-variants`: build additional `nexuschat-api:proxy-upload[-TAG]`, `nexuschat-web:proxy-upload[-TAG]`, `nexuschat-web:proxy-upload-v2[-TAG]`.
-9. `deploy-lab-k8s`: only on `main`; writes kubeconfig from `KUBE_CONFIG_B64` when set, verifies cluster, creates `nexuschat-lab`, runs Helm upgrade with `--wait`, waits each deployment, prints actual images.
+- Pull requests: validation only.
+- Push to `main` or `kafka`, and `v*` tags: validation, image build, scan, SBOM, and signing.
+- Push to `main`: direct K3s lab deployment from a self-hosted runner.
+- Manual: `workflow_dispatch`.
 
 Required GitHub Actions secrets:
 
-- `DOCKER_USERNAME`
-- `DOCKER_PASSWORD` (prefer Docker Hub access token)
-- `KUBE_CONFIG_B64` (optional only if the self-hosted runner already has kubeconfig; otherwise required)
+| Secret | Required | Purpose |
+| --- | --- | --- |
+| `DOCKER_USERNAME` | yes | Docker Hub username. |
+| `DOCKER_PASSWORD` | yes | Docker Hub password or access token. |
+| `KUBE_CONFIG_B64` | conditionally | Base64 kubeconfig for lab deployment; optional only when the self-hosted runner already has kubeconfig. |
 
-The lab deploy command used by CI is effectively:
+The deploy job requires a runner with labels:
+
+```text
+self-hosted, linux, x64, k3s-lab
+```
+
+Create the kubeconfig secret when needed:
+
+```bash
+base64 -w0 ~/.kube/config
+```
+
+CI deploys `main` with the equivalent command:
 
 ```bash
 helm upgrade --install nexuschat deployments/helm/nexuschat \
@@ -425,34 +688,31 @@ helm upgrade --install nexuschat deployments/helm/nexuschat \
   --wait
 ```
 
-Post-deploy checks:
+Watch CI/CD:
 
 ```bash
-kubectl -n nexuschat-lab get pods -o wide
-kubectl -n nexuschat-lab get ingress
-kubectl -n nexuschat-lab get deploy -o jsonpath='{range .items[*]}{.metadata.name}{" => "}{range .spec.template.spec.containers[*]}{.image}{" "}{end}{"\n"}{end}'
-for d in web chat match user uploader forwarder ai-service; do kubectl -n nexuschat-lab rollout status deployment/$d --timeout=600s; done
-curl -I http://192.168.109.131
-curl -i http://192.168.109.131/api/ai/health
+gh run list --workflow "DevSecOps Platform Pipeline" --limit 5
+gh run watch
 ```
 
-## Secrets and runtime config
+### 8. Recommended verification matrix
 
-The Helm chart injects `global.commonEnv` into every container and also `envFrom` secret `nexuschat-runtime` by default.
+Run the checks that match the area you changed:
 
-Create secrets outside Git. At minimum the lab/prod namespace needs values for:
-
-| Key | Used by |
+| Area changed | Minimum checks |
 | --- | --- |
-| `CHAT_JWT_SECRET` | chat |
-| `REDIS_PASSWORD` | Go services |
-| `CASSANDRA_USER`, `CASSANDRA_PASSWORD` | Go services |
-| `UPLOADER_S3_ACCESSKEY`, `UPLOADER_S3_SECRETKEY` | uploader |
-| `USER_OAUTH_GOOGLE_CLIENTID`, `USER_OAUTH_GOOGLE_CLIENTSECRET` | user |
-| `DATABASE_URL`, `AI_ENDPOINT`, `AI_API_KEY`, `AI_MODEL` | ai-service |
-| `AI_POSTGRES_PASSWORD` | ai-service/Postgres bootstrap references |
+| Go backend | `make test`, `make build` |
+| Frontend | `npm --prefix frontend ci`, `npm --prefix frontend run lint`, `npm --prefix frontend run build` |
+| AI service | `python -m ruff check .`, `python -m pytest` inside `ai-service` |
+| Helm/deployment config | `helm lint deployments/helm/nexuschat` and both `helm template` commands above |
+| Docker images | `make docker-api`, `make docker-web`, or `docker compose build` |
+| Documentation only | Markdown link/path sanity, stale reference search, and `git diff --check` |
 
-Do not commit `.env`, kubeconfig, OAuth secrets, JWT secrets, S3 credentials, database passwords, or AI provider keys.
+Generated Swagger docs for Go services:
+
+```bash
+make doc
+```
 
 ## Documentation index
 
