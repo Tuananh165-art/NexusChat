@@ -4,7 +4,7 @@
 
 <a href="#"><img src="docs/icons/go.svg" alt="Go" height="20"/></a> <a href="#"><img src="docs/icons/python.svg" alt="Python" height="20"/></a> <a href="#"><img src="docs/icons/nextjs.svg" alt="Next.js" height="20"/></a> <a href="#"><img src="docs/icons/kafka.svg" alt="Kafka" height="20"/></a> <a href="#"><img src="docs/icons/redis.svg" alt="Redis" height="20"/></a> <a href="#"><img src="docs/icons/cassandra.svg" alt="Cassandra" height="20"/></a> <a href="#"><img src="docs/icons/postgresql.svg" alt="PostgreSQL" height="20"/></a> <a href="#"><img src="docs/icons/docker.svg" alt="Docker" height="20"/></a> <a href="#"><img src="docs/icons/prometheus.svg" alt="Prometheus" height="20"/></a> <a href="#"><img src="docs/icons/jaeger.svg" alt="Jaeger" height="20"/></a>
 
-NexusChat is a real-time chat platform built on a microservices architecture. The current source code comprises a Go backend; a Next.js web app (built as static output and served by a Go binary named `web`); a Python FastAPI `ai-service`; Docker Compose for local development; a Helm chart for Kubernetes; and a GitHub Actions workflow that handles building, scanning, signing, and deploying directly to a K3s lab environment.
+NexusChat is a real-time chat platform built on a microservices architecture.
 
 ## Architecture overview
 
