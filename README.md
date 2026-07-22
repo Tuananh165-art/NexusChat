@@ -177,67 +177,6 @@ flowchart LR
   rollout --> smoke[Print live images and run smoke checks]
 ```
 
-### Kubernetes deployment topology
-
-```mermaid
-flowchart TB
-  subgraph cluster[K3s lab cluster]
-    nginx[ingress-nginx]
-
-    subgraph ns[nexuschat-lab namespace]
-      rel[Helm release: nexuschat]
-      webd[Deployment/Service: web]
-      chatd[Deployment/Service: chat]
-      matchd[Deployment/Service: match]
-      userd[Deployment/Service: user]
-      uploadd[Deployment/Service: uploader]
-      forwarderd[Deployment/Service: forwarder]
-      aid[Deployment/Service: ai-service]
-      secret[nexuschat-runtime Secret]
-    end
-
-    subgraph deps[Separate dependency namespaces]
-      redisns[redis: Redis Cluster]
-      kafkans[kafka: Kafka]
-      cassns[cassandra: Cassandra + schema]
-      minions[minio: bucket myfilebucket]
-      pgns[postgres: AI PostgreSQL]
-    end
-  end
-
-  nginx -->|/, /chat, /_next| webd
-  nginx -->|/api/user| userd
-  nginx -->|/api/match| matchd
-  nginx -->|/api/chat| chatd
-  nginx -->|/api/uploader| uploadd
-  nginx -->|/api/ai with rewrite target /$2| aid
-
-  rel --> webd
-  rel --> chatd
-  rel --> matchd
-  rel --> userd
-  rel --> uploadd
-  rel --> forwarderd
-  rel --> aid
-  secret -. envFrom .-> webd
-  secret -. envFrom .-> chatd
-  secret -. envFrom .-> matchd
-  secret -. envFrom .-> userd
-  secret -. envFrom .-> uploadd
-  secret -. envFrom .-> forwarderd
-  secret -. envFrom .-> aid
-
-  chatd --> cassns
-  chatd --> redisns
-  chatd --> kafkans
-  matchd --> redisns
-  userd --> redisns
-  forwarderd --> kafkans
-  uploadd --> minions
-  aid --> pgns
-  aid --> redisns
-```
-
 ## Components in the repository
 
 | Area | Path | Role |
