@@ -23,6 +23,18 @@ spec:
         - protocol: TCP
           port: 8090
         - protocol: TCP
+          port: 5005
+        - protocol: TCP
+          port: 5006
+        - protocol: TCP
+          port: 5007
+        - protocol: TCP
+          port: 4003
+        - protocol: TCP
+          port: 4004
+        - protocol: TCP
+          port: 4005
+        - protocol: TCP
           port: 8080
   egress:
     - to:
@@ -44,6 +56,10 @@ spec:
           port: 9000
         - protocol: TCP
           port: 5432
+        - protocol: TCP
+          port: 3478
+        - protocol: UDP
+          port: 3478
         - protocol: TCP
           port: 4318
 {{- end }}

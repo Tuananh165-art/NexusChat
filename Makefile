@@ -6,6 +6,7 @@ GOCLEAN=$(GOCMD) clean
 GOINSTALL=$(GOCMD) install
 
 SVCS=chat match uploader user
+REALTIME_SVCS=presence notification call
 
 VERSION=v0.0.0
 
@@ -36,6 +37,10 @@ docker-api:
 	@docker build -f ./build/Dockerfile.api --build-arg VERSION=$(VERSION) -t tuananh165/nexuschat-api:kafka .
 docker-web:
 	@docker build -f ./build/Dockerfile.web --build-arg VERSION=$(VERSION) -t tuananh165/nexuschat-web:kafka .
+docker-realtime:
+	@docker build -f ./build/Dockerfile.realtime --build-arg VERSION=$(VERSION) --build-arg SERVICE=presence -t tuananh165/nexuschat-presence:$(VERSION) .
+	@docker build -f ./build/Dockerfile.realtime --build-arg VERSION=$(VERSION) --build-arg SERVICE=notification -t tuananh165/nexuschat-notification:$(VERSION) .
+	@docker build -f ./build/Dockerfile.realtime --build-arg VERSION=$(VERSION) --build-arg SERVICE=call -t tuananh165/nexuschat-call:$(VERSION) .
 clean:
 	$(GOCLEAN)
 	rm -f server

@@ -15,3 +15,11 @@ swagger.yaml
 frontend/.next
 frontend/node_modules
 frontend/*.tsbuildinfo
+frontend/out
+.gocache
+.docker-config
+.git
+.gitignore
+*.log
+*.db
+*.sqlite

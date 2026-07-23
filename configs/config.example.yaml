@@ -32,6 +32,50 @@ forwarder:
   grpc:
     server:
       port: "4002" 
+presence:
+  http:
+    server:
+      port: "5005"
+  grpc:
+    server:
+      port: "4003"
+  heartbeatSecond: 15
+  ttlSecond: 45
+notification:
+  http:
+    server:
+      port: "5006"
+  grpc:
+    server:
+      port: "4004"
+    client:
+      presence:
+        endpoint: "localhost:4003"
+  retentionDay: 90
+  vapid:
+    publicKey: ""
+    privateKey: ""
+    subject: "mailto:admin@nexuschat.click"
+call:
+  http:
+    server:
+      port: "5007"
+  grpc:
+    server:
+      port: "4005"
+    client:
+      presence:
+        endpoint: "localhost:4003"
+      chat:
+        endpoint: "localhost:4000"
+  ringTimeoutSecond: 30
+  reconnectGraceSecond: 15
+  activeTTLSecond: 7200
+  retentionDay: 30
+  turn:
+    urls: "stun:stun.l.google.com:19302,turn:localhost:3478"
+    sharedSecret: ""
+    ttlSecond: 3600
 match:
   http:
     server:

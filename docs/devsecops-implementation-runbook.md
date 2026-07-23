@@ -57,7 +57,7 @@ kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --ti
 
 ## 3. Stateful dependencies
 
-The application Helm chart does not install Kafka, Redis, Cassandra, MinIO, or PostgreSQL. Install them separately and ensure endpoints match `values-lab-4gb.yaml`:
+The application Helm chart does not install Kafka, Redis, Cassandra, MinIO, or PostgreSQL. Install them separately and ensure endpoints match `values-lab-k3s.yaml`:
 
 | Dependency | Expected endpoint in lab values |
 | --- | --- |
@@ -88,6 +88,10 @@ kubectl create secret generic nexuschat-runtime \
   --from-literal=UPLOADER_S3_SECRETKEY="$MINIO_SECRET_KEY" \
   --from-literal=USER_OAUTH_GOOGLE_CLIENTID="$GOOGLE_CLIENT_ID" \
   --from-literal=USER_OAUTH_GOOGLE_CLIENTSECRET="$GOOGLE_CLIENT_SECRET" \
+  --from-literal=NOTIFICATION_VAPID_PUBLICKEY="$NOTIFICATION_VAPID_PUBLICKEY" \
+  --from-literal=NOTIFICATION_VAPID_PRIVATEKEY="$NOTIFICATION_VAPID_PRIVATEKEY" \
+  --from-literal=NOTIFICATION_VAPID_SUBJECT='mailto:admin@nexuschat.click' \
+  --from-literal=CALL_TURN_SHAREDSECRET="$CALL_TURN_SHAREDSECRET" \
   --from-literal=DATABASE_URL="postgresql+asyncpg://nexuschat_ai:$AI_POSTGRES_PASSWORD@ai-postgres-postgresql.postgres.svc.cluster.local:5432/nexuschat_ai" \
   --from-literal=AI_ENDPOINT="$AI_ENDPOINT" \
   --from-literal=AI_API_KEY="$AI_API_KEY" \
@@ -136,7 +140,7 @@ On push to `main`:
 2. Build/push/sign/scan/SBOM primary Docker Hub images.
 3. Build/push proxy/lab variant images.
 4. Deploy lab with Helm directly.
-5. Wait rollout for deployment names: `web chat match user uploader forwarder ai-service`.
+5. Wait rollout for deployment names: `web chat match user uploader forwarder ai-service presence notification call`; verify Coturn when enabled.
 
 ## 7. Manual lab deploy equivalent
 
@@ -146,7 +150,7 @@ helm upgrade --install nexuschat deployments/helm/nexuschat \
   --namespace nexuschat-lab \
   --create-namespace \
   --values deployments/helm/nexuschat/values.yaml \
-  --values deployments/helm/nexuschat/values-lab-4gb.yaml \
+  --values deployments/helm/nexuschat/values-lab-k3s.yaml \
   --set-string imageDefaults.tag="$TAG" \
   --set-string services.web.image.fullname="docker.io/tuananh165/nexuschat-web:proxy-upload-v2-$TAG" \
   --set-string services.uploader.image.fullname="docker.io/tuananh165/nexuschat-api:proxy-upload-$TAG" \
@@ -163,11 +167,11 @@ kubectl -n nexuschat-lab get svc
 kubectl -n nexuschat-lab get ingress
 kubectl -n nexuschat-lab get deploy -o jsonpath='{range .items[*]}{.metadata.name}{" => "}{range .spec.template.spec.containers[*]}{.image}{" "}{end}{"\n"}{end}'
 
-for deploy in web chat match user uploader forwarder ai-service; do
+for deploy in web chat match user uploader forwarder ai-service presence notification call; do
   kubectl -n nexuschat-lab rollout status deployment/$deploy --timeout=600s
 done
 
-curl -I http://192.168.109.131
+curl -I https://nexuschat.click
 curl -i http://192.168.109.131/api/ai/health
 ```
 
@@ -206,7 +210,7 @@ export OLD_TAG='<previous-sha>'
 helm upgrade --install nexuschat deployments/helm/nexuschat \
   --namespace nexuschat-lab \
   --values deployments/helm/nexuschat/values.yaml \
-  --values deployments/helm/nexuschat/values-lab-4gb.yaml \
+  --values deployments/helm/nexuschat/values-lab-k3s.yaml \
   --set-string imageDefaults.tag="$OLD_TAG" \
   --set-string services.web.image.fullname="docker.io/tuananh165/nexuschat-web:proxy-upload-v2-$OLD_TAG" \
   --set-string services.uploader.image.fullname="docker.io/tuananh165/nexuschat-api:proxy-upload-$OLD_TAG" \

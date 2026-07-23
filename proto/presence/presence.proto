@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package nexuschat.presence.v1;
+
+option go_package = "github.com/Tuananh165-art/NexusChat/proto/presence";
+
+message PresenceRequest {
+  string user_id = 1;
+  string device_id = 2;
+}
+
+message PresenceResponse {
+  string user_id = 1;
+  bool online = 2;
+  string last_seen = 3;
+  int32 devices = 4;
+}
+
+service PresenceService {
+  rpc GetPresence(PresenceRequest) returns (PresenceResponse);
+  rpc BatchGetPresence(PresenceRequest) returns (PresenceResponse);
+  rpc TouchPresence(PresenceRequest) returns (PresenceResponse);
+  rpc DisconnectDevice(PresenceRequest) returns (PresenceResponse);
+}

@@ -125,7 +125,7 @@ export async function fetchMediaMessages(type = "all", limit = 50): Promise<Chan
 }
 
 export async function fetchNotificationPrefs(uid: string): Promise<{ pref: string }> {
-  const res = await fetch(`/api/chat/notification/prefs?uid=${uid}`, {
+  const res = await fetch(`/api/notifications/preferences?uid=${uid}`, {
     method: "GET",
     headers: authHeaders(),
   });
@@ -134,11 +134,85 @@ export async function fetchNotificationPrefs(uid: string): Promise<{ pref: strin
 }
 
 export async function setNotificationPrefs(uid: string, pref: string): Promise<void> {
-  const res = await fetch(`/api/chat/notification/prefs?uid=${uid}&pref=${pref}`, {
+  const res = await fetch(`/api/notifications/preferences?uid=${uid}&pref=${pref}`, {
     method: "PUT",
     headers: authHeaders(),
   });
   if (res.status !== 200) throw new Error(res.statusText);
+}
+
+export interface RealtimeNotification {
+  id: string;
+  user_id: string;
+  channel_id?: string;
+  type: string;
+  title: string;
+  body: string;
+  data?: Record<string, unknown>;
+  read: boolean;
+  created_at: string;
+}
+
+export async function fetchNotifications(limit = 30): Promise<RealtimeNotification[]> {
+  const res = await fetch(`/api/notifications?limit=${limit}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(res.statusText);
+  const data = await res.json();
+  return data.notifications || [];
+}
+
+export async function fetchNotificationUnreadCount(): Promise<number> {
+  const res = await fetch("/api/notifications/unread-count", { headers: authHeaders() });
+  if (!res.ok) throw new Error(res.statusText);
+  const data = await res.json();
+  return Number(data.count || 0);
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  const res = await fetch(`/api/notifications/${encodeURIComponent(id)}/read`, {
+    method: "PUT",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(res.statusText);
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  const res = await fetch("/api/notifications/read-all", {
+    method: "PUT",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(res.statusText);
+}
+
+export async function fetchPushPublicKey(): Promise<string> {
+  const res = await fetch("/api/notifications/push-public-key");
+  if (!res.ok) throw new Error(res.statusText);
+  const data = await res.json();
+  return data.public_key || "";
+}
+
+export async function savePushSubscription(subscription: PushSubscription): Promise<void> {
+  const res = await fetch("/api/notifications/push-subscriptions", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(subscription),
+  });
+  if (!res.ok) throw new Error(res.statusText);
+}
+
+export async function createCall(calleeId: string, media: "audio" | "video" = "video") {
+  const res = await fetch("/api/calls", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ callee_id: calleeId, media }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => null))?.message || res.statusText);
+  return res.json();
+}
+
+export async function fetchIceConfig() {
+  const res = await fetch("/api/calls/ice-config", { headers: authHeaders() });
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
 }
 
 export interface AIRewriteResult {

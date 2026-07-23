@@ -63,6 +63,7 @@ import ImageModal from "@/components/ImageModal";
 import TypingIndicator from "@/components/TypingIndicator";
 import AnimatedBackground from "@/components/AnimatedBackground";
 import GalleryItem from "@/components/GalleryItem";
+import RealtimePanel from "@/components/RealtimePanel";
 
 interface PeerInfo {
   name: string;
@@ -1121,6 +1122,7 @@ export default function ChatPage() {
           </div>
 
           <div className="flex items-center gap-1 sm:gap-2">
+            <RealtimePanel userId={userId} accessToken={accessToken} />
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}

@@ -42,6 +42,9 @@ jobs:
       - name: Go tests
         run: make test
 
+      - name: Realtime race tests
+        run: go test -race ./pkg/realtime ./pkg/presence ./pkg/notification ./pkg/call ./pkg/chat
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -96,7 +99,7 @@ jobs:
         run: helm template nexuschat deployments/helm/nexuschat --namespace nexuschat-staging > rendered-nexuschat.yaml
 
       - name: Helm template lab 4GB profile
-        run: helm template nexuschat deployments/helm/nexuschat --namespace nexuschat-lab --values deployments/helm/nexuschat/values.yaml --values deployments/helm/nexuschat/values-lab-4gb.yaml > rendered-nexuschat-lab.yaml
+        run: helm template nexuschat deployments/helm/nexuschat --namespace nexuschat-lab --values deployments/helm/nexuschat/values.yaml --values deployments/helm/nexuschat/values-lab-k3s.yaml > rendered-nexuschat-lab.yaml
 
       - name: Upload rendered manifests
         uses: actions/upload-artifact@v4
@@ -203,6 +206,18 @@ jobs:
           - name: ai-service
             dockerfile: ai-service/Dockerfile
             context: ai-service
+          - name: presence
+            dockerfile: build/Dockerfile.realtime
+            context: .
+            service: presence
+          - name: notification
+            dockerfile: build/Dockerfile.realtime
+            context: .
+            service: notification
+          - name: call
+            dockerfile: build/Dockerfile.realtime
+            context: .
+            service: call
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -224,6 +239,15 @@ jobs:
               ;;
             ai-service)
               repo="nexuschat-ai-service"
+              ;;
+            presence)
+              repo="nexuschat-presence"
+              ;;
+            notification)
+              repo="nexuschat-notification"
+              ;;
+            call)
+              repo="nexuschat-call"
               ;;
             *)
               echo "Unknown image name: ${{ matrix.name }}" >&2
@@ -258,6 +282,7 @@ jobs:
           push: true
           build-args: |
             VERSION=${{ steps.vars.outputs.tag }}
+            SERVICE=${{ matrix.service }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -417,16 +442,17 @@ jobs:
             --namespace "$KUBE_NAMESPACE" \
             --create-namespace \
             --values deployments/helm/nexuschat/values.yaml \
-            --values deployments/helm/nexuschat/values-lab-4gb.yaml \
+            --values deployments/helm/nexuschat/values-lab-k3s.yaml \
             --set-string imageDefaults.tag="${TAG}" \
             --set-string services.web.image.fullname=docker.io/tuananh165/nexuschat-web:proxy-upload-v2-${TAG} \
             --set-string services.uploader.image.fullname=docker.io/tuananh165/nexuschat-api:proxy-upload-${TAG} \
             --timeout 10m \
+            --atomic \
             --wait
 
       - name: Wait for deployments
         run: |
-          for deploy in web chat match user uploader forwarder ai-service; do
+          for deploy in web chat match user uploader forwarder ai-service presence notification call; do
             echo "Waiting for rollout: $deploy"
             kubectl -n "$KUBE_NAMESPACE" rollout status deployment/$deploy --timeout=600s
           done
@@ -434,3 +460,12 @@ jobs:
       - name: Show deployed images
         run: |
           kubectl -n "$KUBE_NAMESPACE" get deploy -o jsonpath='{range .items[*]}{.metadata.name}{" => "}{range .spec.template.spec.containers[*]}{.image}{" "}{end}{"\n"}{end}'
+
+      - name: Realtime service smoke checks
+        run: |
+          for target in presence:5005 notification:5006 call:5007; do
+            name="${target%%:*}"
+            kubectl -n "$KUBE_NAMESPACE" run "smoke-${name}-${GITHUB_RUN_ID}" \
+              --image=curlimages/curl:8.12.1 --restart=Never --rm --attach \
+              --command -- curl --fail --max-time 10 "http://${target}/ready"
+          done

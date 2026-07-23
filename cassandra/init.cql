@@ -54,3 +54,84 @@ CREATE TABLE IF NOT EXISTS channel_roles (
     assigned_at timestamp,
     PRIMARY KEY (channel_id, user_id)
 );
+
+CREATE TABLE IF NOT EXISTS notifications_by_user (
+    user_id bigint,
+    created_at timeuuid,
+    notification_id text,
+    channel_id bigint,
+    type text,
+    title text,
+    body text,
+    data text,
+    is_read boolean,
+    PRIMARY KEY ((user_id), created_at, notification_id)
+) WITH CLUSTERING ORDER BY (created_at DESC)
+AND default_time_to_live = 7776000;
+
+CREATE TABLE IF NOT EXISTS push_subscriptions_by_user (
+    user_id bigint,
+    endpoint text,
+    p256dh text,
+    auth text,
+    created_at timestamp,
+    PRIMARY KEY ((user_id), endpoint)
+);
+
+CREATE TABLE IF NOT EXISTS notification_preferences (
+    user_id bigint,
+    channel_id bigint,
+    preference text,
+    updated_at timestamp,
+    PRIMARY KEY ((user_id), channel_id)
+);
+
+CREATE TABLE IF NOT EXISTS calls_by_user (
+    user_id bigint,
+    created_at timeuuid,
+    call_id text,
+    channel_id bigint,
+    caller_id bigint,
+    callee_id bigint,
+    state text,
+    media text,
+    accepted_at timestamp,
+    ended_at timestamp,
+    end_reason text,
+    PRIMARY KEY ((user_id), created_at, call_id)
+) WITH CLUSTERING ORDER BY (created_at DESC)
+AND default_time_to_live = 2592000;
+
+CREATE TABLE IF NOT EXISTS calls_by_channel (
+    channel_id bigint,
+    created_at timeuuid,
+    call_id text,
+    caller_id bigint,
+    callee_id bigint,
+    state text,
+    media text,
+    accepted_at timestamp,
+    ended_at timestamp,
+    end_reason text,
+    PRIMARY KEY ((channel_id), created_at, call_id)
+) WITH CLUSTERING ORDER BY (created_at DESC)
+AND default_time_to_live = 2592000;
+
+CREATE TABLE IF NOT EXISTS processed_events (
+    service text,
+    event_id text,
+    processed_at timestamp,
+    PRIMARY KEY ((service), event_id)
+) WITH default_time_to_live = 604800;
+
+CREATE TABLE IF NOT EXISTS outbox_events (
+    service text,
+    bucket date,
+    event_id text,
+    topic text,
+    payload text,
+    published boolean,
+    created_at timestamp,
+    PRIMARY KEY ((service, bucket), created_at, event_id)
+) WITH CLUSTERING ORDER BY (created_at ASC)
+AND default_time_to_live = 604800;

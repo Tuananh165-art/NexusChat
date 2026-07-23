@@ -2,8 +2,8 @@ global:
   imageRegistry: docker.io/tuananh165
   imagePullSecrets: []
   environment: staging
-  domain: nexuschat.example.com
-  tlsSecretName: nexuschat-tls
+  domain: nexuschat.click
+  tlsSecretName: nexuschat-click-tls
   deploymentStrategy:
     type: RollingUpdate
     rollingUpdate:
@@ -269,3 +269,104 @@ services:
       minReplicas: 2
       maxReplicas: 6
       targetCPUUtilizationPercentage: 70
+
+  presence:
+    enabled: true
+    image:
+      repository: nexuschat-presence
+    command: ["presence"]
+    replicas: 2
+    containerPort: 5005
+    grpcPort: 4003
+    metricsPort: 8080
+    path: /api/presence
+    env:
+      PRESENCE_HTTP_SERVER_PORT: "5005"
+      PRESENCE_GRPC_SERVER_PORT: "4003"
+      PRESENCE_HEARTBEATSECOND: "15"
+      PRESENCE_TTLSECOND: "45"
+      CHAT_JWT_EXPIRATIONSECOND: "86400"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 96Mi
+      limits:
+        cpu: 500m
+        memory: 384Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 70
+
+  notification:
+    enabled: true
+    image:
+      repository: nexuschat-notification
+    command: ["notification"]
+    replicas: 2
+    containerPort: 5006
+    grpcPort: 4004
+    metricsPort: 8080
+    path: /api/notifications
+    env:
+      NOTIFICATION_HTTP_SERVER_PORT: "5006"
+      NOTIFICATION_GRPC_SERVER_PORT: "4004"
+      NOTIFICATION_GRPC_CLIENT_PRESENCE_ENDPOINT: "presence:4003"
+      NOTIFICATION_RETENTIONDAY: "90"
+      NOTIFICATION_VAPID_SUBJECT: "mailto:admin@nexuschat.click"
+      CHAT_JWT_EXPIRATIONSECOND: "86400"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 700m
+        memory: 512Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 70
+
+  call:
+    enabled: true
+    image:
+      repository: nexuschat-call
+    command: ["call"]
+    replicas: 2
+    containerPort: 5007
+    grpcPort: 4005
+    metricsPort: 8080
+    path: /api/calls
+    env:
+      CALL_HTTP_SERVER_PORT: "5007"
+      CALL_GRPC_SERVER_PORT: "4005"
+      CALL_GRPC_CLIENT_PRESENCE_ENDPOINT: "presence:4003"
+      CALL_GRPC_CLIENT_CHAT_ENDPOINT: "chat:4000"
+      CALL_RINGTIMEOUTSECOND: "30"
+      CALL_RECONNECTGRACESECOND: "15"
+      CALL_ACTIVETTLSECOND: "7200"
+      CALL_RETENTIONDAY: "30"
+      CALL_TURN_URLS: "stun:stun.l.google.com:19302,turn:turn.nexuschat.click:3478"
+      CALL_TURN_TTLSECOND: "3600"
+      CHAT_JWT_EXPIRATIONSECOND: "86400"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 700m
+        memory: 512Mi
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 70
+
+turn:
+  enabled: false
+  image: coturn/coturn:4.6.2
+  realm: nexuschat.click
+  minPort: 49160
+  maxPort: 49200

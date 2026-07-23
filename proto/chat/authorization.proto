@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package nexuschat.chat.v1;
+
+option go_package = "github.com/Tuananh165-art/NexusChat/proto/chat";
+
+message AuthorizeChannelMemberRequest {
+  uint64 channel_id = 1;
+  uint64 user_id = 2;
+}
+
+message AuthorizeChannelMemberResponse {
+  bool authorized = 1;
+}
+
+service AuthorizationService {
+  rpc AuthorizeChannelMember(AuthorizeChannelMemberRequest) returns (AuthorizeChannelMemberResponse);
+}

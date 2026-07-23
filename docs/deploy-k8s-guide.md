@@ -9,7 +9,7 @@ Current target lab:
 - Ingress controller: ingress-nginx.
 - App Helm release: `nexuschat`.
 - App chart: `deployments/helm/nexuschat`.
-- Lab values: `deployments/helm/nexuschat/values-lab-4gb.yaml`.
+- Lab values: `deployments/helm/nexuschat/values-lab-k3s.yaml`.
 - Registry: Docker Hub `docker.io/tuananh165`.
 - Current CI/CD: GitHub Actions self-hosted runner + direct Helm deploy, not ArgoCD.
 
@@ -119,7 +119,7 @@ helm upgrade --install redis bitnami/redis-cluster \
 kubectl -n redis get pods,svc -o wide
 ```
 
-Expected Helm service names in `values-lab-4gb.yaml` point at `redis-redis-cluster-0/1/2.redis-redis-cluster-headless.redis.svc.cluster.local:6379`.
+Expected Helm service names in `values-lab-k3s.yaml` point at `redis-redis-cluster-0/1/2.redis-redis-cluster-headless.redis.svc.cluster.local:6379`.
 
 ### 6.2 Kafka
 
@@ -384,7 +384,7 @@ helm upgrade --install nexuschat deployments/helm/nexuschat \
   --namespace nexuschat-lab \
   --create-namespace \
   --values deployments/helm/nexuschat/values.yaml \
-  --values deployments/helm/nexuschat/values-lab-4gb.yaml \
+  --values deployments/helm/nexuschat/values-lab-k3s.yaml \
   --set-string imageDefaults.tag="$TAG" \
   --set-string services.web.image.fullname="docker.io/tuananh165/nexuschat-web:proxy-upload-v2-$TAG" \
   --set-string services.uploader.image.fullname="docker.io/tuananh165/nexuschat-api:proxy-upload-$TAG" \
@@ -544,7 +544,7 @@ sudo /usr/local/bin/k3s-uninstall.sh
 - [ ] MinIO bucket `myfilebucket` exists.
 - [ ] Secret `nexuschat-runtime` exists in `nexuschat-lab`.
 - [ ] Docker Hub images for selected tag exist.
-- [ ] Helm release `nexuschat` deployed with `values-lab-4gb.yaml`.
+- [ ] Helm release `nexuschat` deployed with `values-lab-k3s.yaml`.
 - [ ] All 7 deployments rolled out.
 - [ ] `curl http://192.168.109.131` responds.
 - [ ] `curl http://192.168.109.131/api/ai/health` responds.

@@ -11,14 +11,15 @@ import (
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
-	"github.com/gocql/gocql"
 	"github.com/Tuananh165-art/NexusChat/pkg/common"
 	"github.com/Tuananh165-art/NexusChat/pkg/config"
+	"github.com/Tuananh165-art/NexusChat/pkg/realtime"
+	"github.com/gocql/gocql"
 
-	"github.com/go-kit/kit/endpoint"
 	"github.com/Tuananh165-art/NexusChat/pkg/transport"
 	forwarderpb "github.com/Tuananh165-art/NexusChat/proto/forwarder"
 	userpb "github.com/Tuananh165-art/NexusChat/proto/user"
+	"github.com/go-kit/kit/endpoint"
 )
 
 var (
@@ -160,10 +161,28 @@ func (repo *MessageRepoImpl) MarkMessageSeen(ctx context.Context, channelID, mes
 	return nil
 }
 func (repo *MessageRepoImpl) PublishMessage(ctx context.Context, msg *Message) error {
-	return repo.p.Publish(MessagePubTopic, message.NewMessage(
+	if err := repo.p.Publish(MessagePubTopic, message.NewMessage(
 		watermill.NewUUID(),
 		msg.Encode(),
-	))
+	)); err != nil {
+		return err
+	}
+	event, err := realtime.NewEvent("chat.message.created", "chat", strconv.FormatUint(msg.MessageID, 10), map[string]any{
+		"message_id": msg.MessageID,
+		"event":      msg.Event,
+		"channel_id": msg.ChannelID,
+		"user_id":    msg.UserID,
+		"payload":    msg.Payload,
+		"timestamp":  msg.Time,
+	})
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	return repo.p.Publish(realtime.ChatEventsTopic, message.NewMessage(watermill.NewUUID(), body))
 }
 func (repo *MessageRepoImpl) ListMessages(ctx context.Context, channelID uint64, pageStateBase64 string) ([]*Message, string, error) {
 	var messages []*Message

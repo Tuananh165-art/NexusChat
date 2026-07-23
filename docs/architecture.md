@@ -15,6 +15,9 @@ NexusChat is a real-time microservices chat system. The Go backend builds into o
 | `forwarder` | `pkg/forwarder` | `server forwarder` | gRPC | internal only |
 | `uploader` | `pkg/uploader` | `server uploader` | HTTP | `/api/uploader` |
 | `ai-service` | `ai-service/app` | `uvicorn app.main:app` | HTTP + SSE | `/api/ai` via ingress rewrite/strip-prefix |
+| `presence` | `pkg/presence` | `server presence` | HTTP + gRPC + WebSocket | `/api/presence` |
+| `notification` | `pkg/notification` | `server notification` | HTTP + gRPC + WebSocket | `/api/notifications` |
+| `call` | `pkg/call` | `server call` | HTTP + gRPC + WebSocket | `/api/calls` |
 
 ## Service responsibilities
 
@@ -69,6 +72,13 @@ NexusChat is a real-time microservices chat system. The Go backend builds into o
 - MCP preview: `GET /v1/mcp/tools`, `POST /v1/mcp/tools/preview`.
 - Workflow draft support exists in the application layer and tests; expose/extend routers as contracts stabilize.
 
+### Realtime extensions
+
+- `presence` owns device heartbeats and online/last-seen state in Redis, publishing `nexuschat.presence.events.v1`.
+- `notification` owns inbox, unread counts, channel preferences and Web Push subscriptions in Cassandra; it consumes chat/call events idempotently.
+- `call` owns 1-1 WebRTC signaling and call metadata. Browser media remains P2P; Redis holds active-call locks and Cassandra retains call metadata for 30 days.
+- All three services expose health/readiness, typed `.proto` contracts, and gRPC descriptors backed by the shared event envelope in `pkg/realtime`.
+
 ## Data ownership
 
 | Owner | Data |
@@ -79,6 +89,9 @@ NexusChat is a real-time microservices chat system. The Go backend builds into o
 | `forwarder` | Transient subscriber routing |
 | `uploader` | Object names, upload authorization, presigned/proxy upload behavior; object bytes live in S3/MinIO |
 | `ai-service` | AI requests/responses, agents, workflow/audit/settings/memory models in PostgreSQL/Alembic; Redis for AI cache/coordination where configured |
+| `presence` | Device heartbeats, online state and last-seen in Redis |
+| `notification` | Notifications, preferences, push subscriptions and processed-event deduplication in Cassandra |
+| `call` | Active call locks in Redis; call metadata in Cassandra with 30-day TTL; no media/SDP persistence |
 
 Cross-service reads/writes must go through HTTP/gRPC contracts or events. Do not couple one service directly to another service's storage schema.
 
@@ -87,12 +100,13 @@ Cross-service reads/writes must go through HTTP/gRPC contracts or events. Do not
 | Dependency | Local Compose | Kubernetes/Lab expectation |
 | --- | --- | --- |
 | Kafka | `confluentinc/cp-kafka:7.6.0` | `kafka.kafka.svc.cluster.local:9092` |
-| Redis | 6-node `bitnamilegacy/redis-cluster:8.2.1` | Redis Cluster endpoints in `values-lab-4gb.yaml`; standalone Redis is not compatible with current Go cluster client |
+| Redis | 6-node `bitnamilegacy/redis-cluster:8.2.1` | Redis Cluster endpoints in `values-lab-k3s.yaml`; standalone Redis is not compatible with current Go cluster client |
 | Cassandra | `cassandra:4.0` + `cassandra/init.cql` | `cassandra.cassandra.svc.cluster.local:9042`, schema applied separately |
 | MinIO/S3 | `minio/minio`, bucket `myfilebucket` | MinIO or S3-compatible API, bucket created before uploader use |
 | PostgreSQL | `postgres:16-alpine` for AI | `DATABASE_URL` injected into `ai-service` |
 | Ingress | Traefik in Compose | ingress-nginx in current lab/prod Helm path; Traefik Middleware only optional for specific uploader forward-auth profiles |
 | Observability | Prometheus + Jaeger | Optional kube-prometheus-stack/Grafana/Jaeger/ELK manifests under `deployments/platform` |
+| WebRTC relay | Coturn in Compose | Optional lab Coturn DaemonSet on `turn.nexuschat.click`; production may use external TURN |
 
 ## Request flow examples
 
@@ -121,10 +135,17 @@ Cross-service reads/writes must go through HTTP/gRPC contracts or events. Do not
 4. `ai-service` builds prompts and calls OpenAI-compatible `AI_ENDPOINT` with `AI_API_KEY` and `AI_MODEL`.
 5. Rewritten text returns to composer; sending it is a normal chat message.
 
+### Presence, notification and call flow
+
+1. Browser opens presence and notification WebSockets alongside chat and sends a 15-second heartbeat.
+2. Chat publishes a versioned `chat.message.created` event; notification consumes it, applies preferences, persists one inbox item and sends Web Push only when no active browser session exists.
+3. Browser creates a call through `/api/calls`; call service validates channel membership, locks both users in Redis, publishes `call.ringing`, and relays WebRTC offer/answer/ICE through its WebSocket.
+4. Call state transitions publish versioned events; notification creates incoming/missed-call notifications without storing media or signaling payloads.
+
 ## Deployment architecture
 
 - Helm creates one Deployment and one ClusterIP Service per enabled NexusChat service.
-- Deployments are named `web`, `chat`, `match`, `user`, `uploader`, `forwarder`, `ai-service`.
+- Deployments are named `web`, `chat`, `match`, `user`, `uploader`, `forwarder`, `ai-service`, `presence`, `notification`, and `call`.
 - Default app ingress class is `nginx`; default host comes from `global.domain`.
 - `ai-service` ingress uses regex path `/api/ai(/|$)(.*)` with nginx rewrite target `/$2`.
 - `forwarder` has no ingress path and is internal-only.

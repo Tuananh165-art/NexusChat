@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package nexuschat.notification.v1;
+
+option go_package = "github.com/Tuananh165-art/NexusChat/proto/notification";
+
+message NotificationRequest {
+  string user_id = 1;
+  string channel_id = 2;
+  string type = 3;
+  string title = 4;
+  string body = 5;
+  string event_id = 6;
+}
+
+message NotificationResponse {
+  string notification_id = 1;
+  int64 unread_count = 2;
+}
+
+service NotificationService {
+  rpc CreateNotification(NotificationRequest) returns (NotificationResponse);
+  rpc GetPreferences(NotificationRequest) returns (NotificationResponse);
+  rpc UpdatePreferences(NotificationRequest) returns (NotificationResponse);
+  rpc GetUnreadCount(NotificationRequest) returns (NotificationResponse);
+}

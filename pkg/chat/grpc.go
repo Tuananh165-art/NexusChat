@@ -1,16 +1,20 @@
 package chat
 
 import (
+	"context"
 	"log/slog"
 	"net"
 	"os"
+	"strconv"
 
 	"google.golang.org/grpc"
 
 	"github.com/Tuananh165-art/NexusChat/pkg/common"
 	"github.com/Tuananh165-art/NexusChat/pkg/config"
+	"github.com/Tuananh165-art/NexusChat/pkg/realtime"
 	"github.com/Tuananh165-art/NexusChat/pkg/transport"
 	chatpb "github.com/Tuananh165-art/NexusChat/proto/chat"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 type GrpcServer struct {
@@ -35,6 +39,35 @@ func NewGrpcServer(name string, logger common.GrpcLog, config *config.Config, us
 func (srv *GrpcServer) Register() {
 	chatpb.RegisterChannelServiceServer(srv.s, srv)
 	chatpb.RegisterUserServiceServer(srv.s, srv)
+	realtime.RegisterStructRPC(srv.s, "nexuschat.chat.v1.AuthorizationService", map[string]func(context.Context, *structpb.Struct) (*structpb.Struct, error){
+		"AuthorizeChannelMember": func(ctx context.Context, request *structpb.Struct) (*structpb.Struct, error) {
+			channelField := request.GetFields()["channel_id"]
+			userField := request.GetFields()["user_id"]
+			if channelField == nil || userField == nil {
+				return structpb.NewStruct(map[string]any{"authorized": false})
+			}
+			channelID, err := parseUintField(channelField)
+			if err != nil {
+				return structpb.NewStruct(map[string]any{"authorized": false})
+			}
+			userID, err := parseUintField(userField)
+			if err != nil {
+				return structpb.NewStruct(map[string]any{"authorized": false})
+			}
+			authorized, err := srv.userSvc.IsChannelUserExist(ctx, channelID, userID)
+			if err != nil {
+				return nil, err
+			}
+			return structpb.NewStruct(map[string]any{"authorized": authorized})
+		},
+	})
+}
+
+func parseUintField(field *structpb.Value) (uint64, error) {
+	if value := field.GetStringValue(); value != "" {
+		return strconv.ParseUint(value, 10, 64)
+	}
+	return uint64(field.GetNumberValue()), nil
 }
 
 func (srv *GrpcServer) Run() {

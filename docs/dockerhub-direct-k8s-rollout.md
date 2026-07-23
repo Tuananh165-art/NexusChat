@@ -23,7 +23,7 @@ When code is pushed to `main`:
 | `.github/workflows/devsecops-platform.yml` | Main CI/CD pipeline |
 | `deployments/helm/nexuschat` | Application Helm chart |
 | `deployments/helm/nexuschat/values.yaml` | Default values |
-| `deployments/helm/nexuschat/values-lab-4gb.yaml` | Overrides for the small K3s lab |
+| `deployments/helm/nexuschat/values-lab-k3s.yaml` | Overrides for the small K3s lab |
 | `docs/deploy-k8s-guide.md` | Detailed lab deployment runbook |
 
 ## 3. Images built and pushed
@@ -79,7 +79,7 @@ helm upgrade --install nexuschat deployments/helm/nexuschat \
   --namespace nexuschat-lab \
   --create-namespace \
   --values deployments/helm/nexuschat/values.yaml \
-  --values deployments/helm/nexuschat/values-lab-4gb.yaml \
+  --values deployments/helm/nexuschat/values-lab-k3s.yaml \
   --set-string imageDefaults.tag="${GITHUB_SHA}" \
   --set-string services.web.image.fullname="docker.io/tuananh165/nexuschat-web:proxy-upload-v2-${GITHUB_SHA}" \
   --set-string services.uploader.image.fullname="docker.io/tuananh165/nexuschat-api:proxy-upload-${GITHUB_SHA}" \
@@ -147,7 +147,7 @@ helm upgrade --install nexuschat deployments/helm/nexuschat \
   --namespace nexuschat-lab \
   --create-namespace \
   --values deployments/helm/nexuschat/values.yaml \
-  --values deployments/helm/nexuschat/values-lab-4gb.yaml \
+  --values deployments/helm/nexuschat/values-lab-k3s.yaml \
   --set-string imageDefaults.tag="$OLD_TAG" \
   --set-string services.web.image.fullname="docker.io/tuananh165/nexuschat-web:proxy-upload-v2-$OLD_TAG" \
   --set-string services.uploader.image.fullname="docker.io/tuananh165/nexuschat-api:proxy-upload-$OLD_TAG" \
@@ -172,5 +172,5 @@ Use `git add .` only after confirming there are no secrets, build artifacts, or 
 
 - ArgoCD sync is not required to deploy the lab.
 - Committing image tag bumps to GitOps apps is not required for the lab to receive new images.
-- Consul CRDs are not required in the lab profile because `values-lab-4gb.yaml` disables `consul.serviceDefaults.enabled`.
+- Consul CRDs are not required in the lab profile because `values-lab-k3s.yaml` disables `consul.serviceDefaults.enabled`.
 - The Traefik ingress controller is not required in the K3s lab; the lab chart uses ingress-nginx.

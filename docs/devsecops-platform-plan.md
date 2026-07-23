@@ -91,7 +91,7 @@ It:
 4. Writes `~/.kube/config` from `KUBE_CONFIG_B64` if the secret is provided; otherwise uses the runner's existing kubeconfig.
 5. Prints current cluster context/server and nodes.
 6. Ensures namespace `nexuschat-lab` exists.
-7. Runs `helm upgrade --install nexuschat ... --wait --timeout 10m` with base values plus `values-lab-4gb.yaml`.
+7. Runs `helm upgrade --install nexuschat ... --wait --timeout 10m` with base values plus `values-lab-k3s.yaml`.
 8. Overrides `imageDefaults.tag` to the SHA.
 9. Overrides `web` and `uploader` to SHA-specific proxy variant images.
 10. Waits for deployments `web`, `chat`, `match`, `user`, `uploader`, `forwarder`, `ai-service`.
