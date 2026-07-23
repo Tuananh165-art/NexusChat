@@ -22,12 +22,16 @@ spec:
       containers:
         - name: coturn
           image: {{ .Values.turn.image }}
-          command: ["/bin/sh", "-c"]
           args:
-            - >-
-              exec turnserver -n --log-file=stdout --fingerprint --use-auth-secret
-              --static-auth-secret="$TURN_SHARED_SECRET" --realm={{ .Values.turn.realm }}
-              --no-cli --min-port={{ .Values.turn.minPort }} --max-port={{ .Values.turn.maxPort }}
+            - -n
+            - --log-file=stdout
+            - --fingerprint
+            - --use-auth-secret
+            - --static-auth-secret=$(TURN_SHARED_SECRET)
+            - --realm={{ .Values.turn.realm }}
+            - --no-cli
+            - --min-port={{ .Values.turn.minPort }}
+            - --max-port={{ .Values.turn.maxPort }}
           env:
             - name: TURN_SHARED_SECRET
               valueFrom:
@@ -44,7 +48,8 @@ spec:
               hostPort: 3478
               protocol: UDP
           securityContext:
-            allowPrivilegeEscalation: false
+            allowPrivilegeEscalation: true
             capabilities:
               drop: ["ALL"]
+              add: ["NET_BIND_SERVICE"]
 {{- end }}

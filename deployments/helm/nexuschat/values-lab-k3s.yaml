@@ -31,7 +31,21 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-body-size: "32m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "180"
-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+
+certManager:
+  enabled: true
+  clusterIssuer:
+    create: true
+    name: letsencrypt-prod
+    email: admin@nexuschat.click
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretName: letsencrypt-prod-account-key
+  certificate:
+    create: true
+    secretName: nexuschat-click-tls
+    dnsNames:
+      - nexuschat.click
 
 serviceMonitor:
   enabled: false

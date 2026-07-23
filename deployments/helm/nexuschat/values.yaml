@@ -39,6 +39,19 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
 
+certManager:
+  enabled: false
+  clusterIssuer:
+    create: false
+    name: letsencrypt-prod
+    email: admin@nexuschat.click
+    server: https://acme-v02.api.letsencrypt.org/directory
+    privateKeySecretName: letsencrypt-prod-account-key
+  certificate:
+    create: true
+    secretName: ""
+    dnsNames: []
+
 traefik:
   apiVersion: traefik.io/v1alpha1
 

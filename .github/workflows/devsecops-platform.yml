@@ -434,6 +434,43 @@ jobs:
           kubectl get nodes -o wide
           kubectl create namespace "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Ensure cert-manager and Let's Encrypt issuer
+        run: |
+          set -euo pipefail
+          helm repo add jetstack https://charts.jetstack.io
+          helm repo update
+          helm upgrade --install cert-manager jetstack/cert-manager \
+            --namespace cert-manager \
+            --create-namespace \
+            --set crds.enabled=true \
+            --wait \
+            --timeout 5m
+          kubectl wait --for=condition=Established crd/certificates.cert-manager.io crd/clusterissuers.cert-manager.io --timeout=120s
+
+      - name: Ensure TURN shared secret
+        env:
+          TURN_SHARED_SECRET: ${{ secrets.CALL_TURN_SHAREDSECRET }}
+        run: |
+          set -euo pipefail
+          if kubectl -n "$KUBE_NAMESPACE" get secret nexuschat-runtime -o jsonpath='{.data.CALL_TURN_SHAREDSECRET}' 2>/dev/null | grep -q .; then
+            echo "nexuschat-runtime already contains CALL_TURN_SHAREDSECRET"
+            exit 0
+          fi
+
+          if [[ -z "$TURN_SHARED_SECRET" ]]; then
+            TURN_SHARED_SECRET="$(openssl rand -hex 32)"
+          fi
+
+          if kubectl -n "$KUBE_NAMESPACE" get secret nexuschat-runtime >/dev/null 2>&1; then
+            encoded_secret="$(printf '%s' "$TURN_SHARED_SECRET" | base64 -w0)"
+            kubectl -n "$KUBE_NAMESPACE" patch secret nexuschat-runtime \
+              --type merge \
+              -p "{\"data\":{\"CALL_TURN_SHAREDSECRET\":\"${encoded_secret}\"}}"
+          else
+            kubectl -n "$KUBE_NAMESPACE" create secret generic nexuschat-runtime \
+              --from-literal=CALL_TURN_SHAREDSECRET="$TURN_SHARED_SECRET"
+          fi
+
       - name: Helm upgrade lab release
         env:
           TAG: ${{ steps.vars.outputs.tag }}
