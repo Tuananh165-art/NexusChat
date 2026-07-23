@@ -2,7 +2,7 @@
 
 ## Overview
 
-NexusChat is a real-time microservices chat system. The Go backend builds into one `server` binary with multiple subcommands; the same `nexuschat-api` image runs different commands for each service. The Next.js frontend is built as static output and served by the Go `web` service. AI runs as a separate Python FastAPI service.
+NexusChat is a real-time microservices chat system. The Go backend builds into one `server` binary with multiple subcommands; the main chat/user/match/uploader/forwarder services share the `nexuschat-api` image, while `web`, `ai-service`, `presence`, `notification`, and `call` run as separate images. The Next.js frontend is built as static output and served by the Go `web` service. AI runs as a separate Python FastAPI service.
 
 ## Runtime services
 
@@ -150,7 +150,7 @@ Cross-service reads/writes must go through HTTP/gRPC contracts or events. Do not
 - `ai-service` ingress uses regex path `/api/ai(/|$)(.*)` with nginx rewrite target `/$2`.
 - `forwarder` has no ingress path and is internal-only.
 - Stateful dependencies are external to the app chart.
-- Lab uses namespace `nexuschat-lab`, release `nexuschat`, server IP `192.168.109.131`, and ingress-nginx.
+- Lab uses namespace `nexuschat-lab`, release `nexuschat`, server IP `IP`, and ingress-nginx.
 
 ## Reliability and security boundaries
 

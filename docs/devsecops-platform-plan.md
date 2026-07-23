@@ -8,7 +8,7 @@ This document describes the current DevSecOps baseline in source: GitHub Actions
 - Application packaging: Helm chart `deployments/helm/nexuschat`.
 - CI/CD orchestration: `.github/workflows/devsecops-platform.yml`.
 - Registry: Docker Hub namespace `docker.io/tuananh165`.
-- Lab ingress: ingress-nginx, namespace `nexuschat-lab`, server `192.168.109.131`.
+- Lab ingress: ingress-nginx, namespace `nexuschat-lab`, server `IP`.
 - Security gates: Gitleaks, dependency review, CodeQL, Trivy FS/image, SBOM, Cosign keyless signing.
 - Optional platform add-ons: Prometheus/Grafana, Jaeger, ELK/ECK, Kyverno, ArgoCD, Consul.
 
@@ -52,7 +52,7 @@ The chart intentionally does not install Kafka, Redis, Cassandra, MinIO/S3, Post
 | `dependency-review` | PR-only dependency review |
 | `codeql` | Go, JavaScript/TypeScript, Python CodeQL |
 | `trivy-fs` | Repository filesystem vulnerability scan |
-| `build-images` | Build/push/scan/SBOM/sign `nexuschat-api`, `nexuschat-web`, `nexuschat-ai-service` |
+| `build-images` | Build/push/scan/SBOM/sign `nexuschat-api`, `nexuschat-web`, `nexuschat-ai-service`, `nexuschat-presence`, `nexuschat-notification`, `nexuschat-call` |
 | `build-proxy-variants` | Build/push lab-specific proxy variant tags for API/web |
 | `deploy-lab-k8s` | Self-hosted runner deploy to `nexuschat-lab` with Helm and verify rollouts |
 
@@ -63,6 +63,9 @@ Primary images:
 - `docker.io/tuananh165/nexuschat-api:<tag>`
 - `docker.io/tuananh165/nexuschat-web:<tag>`
 - `docker.io/tuananh165/nexuschat-ai-service:<tag>`
+- `docker.io/tuananh165/nexuschat-presence:<tag>`
+- `docker.io/tuananh165/nexuschat-notification:<tag>`
+- `docker.io/tuananh165/nexuschat-call:<tag>`
 
 Additional lab/proxy variants:
 
@@ -94,7 +97,7 @@ It:
 7. Runs `helm upgrade --install nexuschat ... --wait --timeout 10m` with base values plus `values-lab-k3s.yaml`.
 8. Overrides `imageDefaults.tag` to the SHA.
 9. Overrides `web` and `uploader` to SHA-specific proxy variant images.
-10. Waits for deployments `web`, `chat`, `match`, `user`, `uploader`, `forwarder`, `ai-service`.
+10. Waits for deployments `web`, `chat`, `match`, `user`, `uploader`, `forwarder`, `ai-service`, `presence`, `notification`, `call`.
 11. Prints actual images from live Deployments.
 
 ## Required secrets

@@ -350,8 +350,8 @@ func (s *Service) preferences(c *gin.Context) {
 		err = nil
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": "failed to read preferences"})
-		return
+		slog.Warn("read notification preferences failed; fallback to all", "error", err, "user_id", identity.UserID, "channel_id", channelID)
+		preference = "all"
 	}
 	c.JSON(http.StatusOK, gin.H{"pref": preference})
 }

@@ -1,15 +1,15 @@
 # NexusChat K8s Lab Dashboard URLs
 
-Lab base IP: `192.168.109.131`.
+Lab base IP: `IP`.
 
-These URLs use `nip.io`; no `/etc/hosts` changes are required. Any hostname matching `*.192.168.109.131.nip.io` resolves to `192.168.109.131`.
+These URLs use `nip.io`; no `/etc/hosts` changes are required. Any hostname matching `*.IP.nip.io` resolves to `IP`.
 
 ## NexusChat app
 
 | Service | URL |
 | --- | --- |
-| Web app by IP | `http://192.168.109.131` |
-| AI health by IP | `http://192.168.109.131/api/ai/health` |
+| Web app by IP | `http://IP` |
+| AI health by IP | `http://IP/api/ai/health` |
 
 If deploying with the `nexuschat.click` domain, the app ingress host is that domain instead of a hostless/IP ingress.
 
@@ -17,14 +17,14 @@ If deploying with the `nexuschat.click` domain, the app ingress host is that dom
 
 | Service | URL | Notes |
 | --- | --- | --- |
-| Kafka UI | `http://kafka.192.168.109.131.nip.io` | Requires a `kafka-ui` service in namespace `kafka` |
-| RedisInsight | `http://redis.192.168.109.131.nip.io` | Requires `redisinsight` service in namespace `redis-ui` |
-| MinIO Console | `http://minio.192.168.109.131.nip.io` | Credentials depend on your lab install, commonly `labminio / lab-minio-secret` |
+| Kafka UI | `http://kafka.IP.nip.io` | Requires a `kafka-ui` service in namespace `kafka` |
+| RedisInsight | `http://redis.IP.nip.io` | Requires `redisinsight` service in namespace `redis-ui` |
+| MinIO Console | `http://minio.IP.nip.io` | Credentials depend on your lab install, commonly `labminio / lab-minio-secret` |
 | MinIO/S3 API | `http://s3.nexuschat.click` | Current ingress manifest uses this host for MinIO API |
-| Prometheus | `http://prometheus.192.168.109.131.nip.io` | Requires monitoring manifests/services |
-| Grafana | `http://grafana.192.168.109.131.nip.io` | Credentials depend on installed values, do not commit real password |
-| Jaeger | `http://jaeger.192.168.109.131.nip.io` | Requires Jaeger service in namespace `monitoring` |
-| ArgoCD | `http://argocd.192.168.109.131.nip.io` | Optional; not required for current lab CD path |
+| Prometheus | `http://prometheus.IP.nip.io` | Requires monitoring manifests/services |
+| Grafana | `http://grafana.IP.nip.io` | Credentials depend on installed values, do not commit real password |
+| Jaeger | `http://jaeger.IP.nip.io` | Requires Jaeger service in namespace `monitoring` |
+| ArgoCD | `http://argocd.IP.nip.io` | Optional; not required for current lab CD path |
 | Cassandra | no web UI | Use port-forward/CQL: `kubectl -n cassandra port-forward svc/cassandra 9042:9042` |
 
 ## Config files

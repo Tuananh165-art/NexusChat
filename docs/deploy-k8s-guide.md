@@ -4,7 +4,7 @@ This runbook deploys the lab environment represented by the current source. Prod
 
 Current target lab:
 
-- Server/K3s ingress IP: `192.168.109.131`.
+- Server/K3s ingress IP: `IP`.
 - Namespace app: `nexuschat-lab`.
 - Ingress controller: ingress-nginx.
 - App Helm release: `nexuschat`.
@@ -439,8 +439,8 @@ for deploy in web chat match user uploader forwarder ai-service; do
   kubectl -n nexuschat-lab rollout status deployment/$deploy --timeout=600s
 done
 
-curl -I http://192.168.109.131
-curl -i http://192.168.109.131/api/ai/health
+curl -I http://IP
+curl -i http://IP/api/ai/health
 ```
 
 Check logs:
@@ -545,6 +545,6 @@ sudo /usr/local/bin/k3s-uninstall.sh
 - [ ] Secret `nexuschat-runtime` exists in `nexuschat-lab`.
 - [ ] Docker Hub images for selected tag exist.
 - [ ] Helm release `nexuschat` deployed with `values-lab-k3s.yaml`.
-- [ ] All 7 deployments rolled out.
-- [ ] `curl http://192.168.109.131` responds.
-- [ ] `curl http://192.168.109.131/api/ai/health` responds.
+- [ ] All 10 deployments rolled out.
+- [ ] `curl http://IP` responds.
+- [ ] `curl http://IP/api/ai/health` responds.

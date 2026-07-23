@@ -65,7 +65,7 @@ export default function RealtimePanel({ userId, accessToken }: Props) {
   };
 
   const startPeer = async (callId: string, peer: string, media: "audio" | "video", offer: boolean) => {
-    const config = await fetchIceConfig();
+    const config = await fetchIceConfig(userId);
     const pc = new RTCPeerConnection({ iceServers: config.ice_servers || [] });
     peerRef.current = pc;
     callRef.current = { id: callId, peer, media };
@@ -90,8 +90,8 @@ export default function RealtimePanel({ userId, accessToken }: Props) {
 
   useEffect(() => {
     if (!userId || !accessToken) return;
-    void fetchNotifications().then(setNotifications).catch(() => {});
-    void fetchNotificationUnreadCount().then(setUnread).catch(() => {});
+    void fetchNotifications(30, userId).then(setNotifications).catch(() => {});
+    void fetchNotificationUnreadCount(userId).then(setUnread).catch(() => {});
     const presence = new WebSocket(wsURL("/api/presence/ws"));
     const notification = new WebSocket(wsURL("/api/notifications/ws"));
     const call = new WebSocket(wsURL("/api/calls/ws"));
@@ -159,7 +159,7 @@ export default function RealtimePanel({ userId, accessToken }: Props) {
     try {
       setError("");
       if (!calleeId.trim()) throw new Error("Enter the peer user id");
-      const call = await createCall(calleeId.trim(), "video");
+      const call = await createCall(calleeId.trim(), "video", userId);
       await startPeer(call.id, calleeId.trim(), "video", true);
       setCallState("ringing");
     } catch (err) {
@@ -187,7 +187,7 @@ export default function RealtimePanel({ userId, accessToken }: Props) {
       const key = await fetchPushPublicKey();
       if (!key) throw new Error("Web Push is not configured");
       const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64ToBytes(key) });
-      await savePushSubscription(subscription);
+      await savePushSubscription(subscription, userId);
       setPushReady(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Push setup failed");
@@ -206,10 +206,10 @@ export default function RealtimePanel({ userId, accessToken }: Props) {
       </button>
       {showNotifications && (
         <div className="absolute right-0 top-10 z-50 w-80 rounded-xl border border-white/10 bg-slate-950/95 p-3 shadow-xl">
-          <div className="mb-2 flex items-center justify-between"><span className="text-sm font-semibold text-white">Notifications</span><button onClick={() => void markAllNotificationsRead().then(() => setUnread(0))} className="text-xs text-accent-cyan">Read all</button></div>
+          <div className="mb-2 flex items-center justify-between"><span className="text-sm font-semibold text-white">Notifications</span><button onClick={() => void markAllNotificationsRead(userId).then(() => setUnread(0))} className="text-xs text-accent-cyan">Read all</button></div>
           <div className="max-h-64 space-y-1 overflow-y-auto">
             {notifications.length === 0 && <p className="py-4 text-center text-xs text-text-muted">No notifications</p>}
-            {notifications.map((item) => <button key={item.id} onClick={() => void markNotificationRead(item.id).then(() => setUnread((count) => Math.max(0, count - 1)))} className="flex w-full gap-2 rounded-lg p-2 text-left hover:bg-white/10"><span className="mt-0.5 text-accent-violet"><Check className="h-3.5 w-3.5" /></span><span><span className="block text-xs font-medium text-white">{item.title}</span><span className="block text-[11px] text-text-muted">{item.body}</span></span></button>)}
+            {notifications.map((item) => <button key={item.id} onClick={() => void markNotificationRead(item.id, userId).then(() => setUnread((count) => Math.max(0, count - 1)))} className="flex w-full gap-2 rounded-lg p-2 text-left hover:bg-white/10"><span className="mt-0.5 text-accent-violet"><Check className="h-3.5 w-3.5" /></span><span><span className="block text-xs font-medium text-white">{item.title}</span><span className="block text-[11px] text-text-muted">{item.body}</span></span></button>)}
           </div>
           <button onClick={() => void enablePush()} className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg bg-white/5 px-2 py-1.5 text-xs text-text-secondary hover:bg-white/10">{pushReady ? "Web Push enabled" : "Enable Web Push"}</button>
           {error && <p className="mt-2 text-[11px] text-red-400">{error}</p>}

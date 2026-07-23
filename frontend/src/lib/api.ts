@@ -14,11 +14,13 @@ function getAccessToken(): string {
   return localStorage.getItem(ACCESS_TOKEN_KEY) || "";
 }
 
-function authHeaders(): HeadersInit {
+function authHeaders(userId?: string): HeadersInit {
   const token = getAccessToken();
-  return {
+  const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
   };
+  if (userId) headers["X-User-Id"] = userId;
+  return headers;
 }
 
 export async function fetchMe(): Promise<UserInfo> {
@@ -153,32 +155,32 @@ export interface RealtimeNotification {
   created_at: string;
 }
 
-export async function fetchNotifications(limit = 30): Promise<RealtimeNotification[]> {
-  const res = await fetch(`/api/notifications?limit=${limit}`, { headers: authHeaders() });
+export async function fetchNotifications(limit = 30, userId?: string): Promise<RealtimeNotification[]> {
+  const res = await fetch(`/api/notifications?limit=${limit}`, { headers: authHeaders(userId) });
   if (!res.ok) throw new Error(res.statusText);
   const data = await res.json();
   return data.notifications || [];
 }
 
-export async function fetchNotificationUnreadCount(): Promise<number> {
-  const res = await fetch("/api/notifications/unread-count", { headers: authHeaders() });
+export async function fetchNotificationUnreadCount(userId?: string): Promise<number> {
+  const res = await fetch("/api/notifications/unread-count", { headers: authHeaders(userId) });
   if (!res.ok) throw new Error(res.statusText);
   const data = await res.json();
   return Number(data.count || 0);
 }
 
-export async function markNotificationRead(id: string): Promise<void> {
+export async function markNotificationRead(id: string, userId?: string): Promise<void> {
   const res = await fetch(`/api/notifications/${encodeURIComponent(id)}/read`, {
     method: "PUT",
-    headers: authHeaders(),
+    headers: authHeaders(userId),
   });
   if (!res.ok) throw new Error(res.statusText);
 }
 
-export async function markAllNotificationsRead(): Promise<void> {
+export async function markAllNotificationsRead(userId?: string): Promise<void> {
   const res = await fetch("/api/notifications/read-all", {
     method: "PUT",
-    headers: authHeaders(),
+    headers: authHeaders(userId),
   });
   if (!res.ok) throw new Error(res.statusText);
 }
@@ -190,27 +192,27 @@ export async function fetchPushPublicKey(): Promise<string> {
   return data.public_key || "";
 }
 
-export async function savePushSubscription(subscription: PushSubscription): Promise<void> {
+export async function savePushSubscription(subscription: PushSubscription, userId?: string): Promise<void> {
   const res = await fetch("/api/notifications/push-subscriptions", {
     method: "POST",
-    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    headers: { ...authHeaders(userId), "Content-Type": "application/json" },
     body: JSON.stringify(subscription),
   });
   if (!res.ok) throw new Error(res.statusText);
 }
 
-export async function createCall(calleeId: string, media: "audio" | "video" = "video") {
+export async function createCall(calleeId: string, media: "audio" | "video" = "video", userId?: string) {
   const res = await fetch("/api/calls", {
     method: "POST",
-    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    headers: { ...authHeaders(userId), "Content-Type": "application/json" },
     body: JSON.stringify({ callee_id: calleeId, media }),
   });
   if (!res.ok) throw new Error((await res.json().catch(() => null))?.message || res.statusText);
   return res.json();
 }
 
-export async function fetchIceConfig() {
-  const res = await fetch("/api/calls/ice-config", { headers: authHeaders() });
+export async function fetchIceConfig(userId?: string) {
+  const res = await fetch("/api/calls/ice-config", { headers: authHeaders(userId) });
   if (!res.ok) throw new Error(res.statusText);
   return res.json();
 }

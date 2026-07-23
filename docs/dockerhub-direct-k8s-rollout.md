@@ -13,7 +13,7 @@ When code is pushed to `main`:
 5. The `deploy-lab-k8s` job runs on a self-hosted runner with the `k3s-lab` label.
 6. The job uses kubeconfig from `KUBE_CONFIG_B64` when provided, or the runner's existing kubeconfig otherwise.
 7. It runs `helm upgrade --install` into namespace `nexuschat-lab`.
-8. It waits for these Deployments: `web`, `chat`, `match`, `user`, `uploader`, `forwarder`, `ai-service`.
+8. It waits for these Deployments: `web`, `chat`, `match`, `user`, `uploader`, `forwarder`, `ai-service`, `presence`, `notification`, `call`.
 9. It prints the actual images running in the cluster.
 
 ## 2. Main files
@@ -33,6 +33,9 @@ Primary images:
 - `docker.io/tuananh165/nexuschat-api:<TAG>`
 - `docker.io/tuananh165/nexuschat-web:<TAG>`
 - `docker.io/tuananh165/nexuschat-ai-service:<TAG>`
+- `docker.io/tuananh165/nexuschat-presence:<TAG>`
+- `docker.io/tuananh165/nexuschat-notification:<TAG>`
+- `docker.io/tuananh165/nexuschat-call:<TAG>`
 
 Lab/proxy upload variants:
 
@@ -98,6 +101,9 @@ Actual lab image mapping:
 | `user` | `docker.io/tuananh165/nexuschat-api:<SHA>` |
 | `forwarder` | `docker.io/tuananh165/nexuschat-api:<SHA>` |
 | `ai-service` | `docker.io/tuananh165/nexuschat-ai-service:<SHA>` |
+| `presence` | `docker.io/tuananh165/nexuschat-presence:<SHA>` |
+| `notification` | `docker.io/tuananh165/nexuschat-notification:<SHA>` |
+| `call` | `docker.io/tuananh165/nexuschat-call:<SHA>` |
 
 ## 6. Checks after push
 
@@ -128,8 +134,8 @@ done
 Smoke test the current lab IP:
 
 ```bash
-curl -I http://192.168.109.131
-curl -i http://192.168.109.131/api/ai/health
+curl -I http://IP
+curl -i http://IP/api/ai/health
 ```
 
 ## 7. Quick rollback

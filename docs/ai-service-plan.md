@@ -112,7 +112,7 @@ Kubernetes checks:
 ```bash
 kubectl -n nexuschat-lab logs deploy/ai-service --tail=100
 kubectl -n nexuschat-lab exec deploy/ai-service -- env | grep -E 'AI_|DATABASE_URL|REDIS_URL'
-curl -i http://192.168.109.131/api/ai/health
+curl -i http://IP/api/ai/health
 ```
 
 ## 8. Roadmap

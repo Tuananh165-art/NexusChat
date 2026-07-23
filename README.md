@@ -17,12 +17,15 @@ flowchart TB
     web[web<br/>Go server web<br/>serves frontend/out]
   end
 
-  subgraph go[Go backend: one nexuschat-api image, multiple commands]
+  subgraph go[Go backend: api core + realtime services]
     user[user<br/>HTTP + gRPC<br/>local users, Google OAuth, profile/session lookup]
     match[match<br/>WebSocket /api/match<br/>random matching orchestration]
     chat[chat<br/>HTTP + gRPC + WebSocket<br/>channels, messages, roles, search, AI proxy]
     forwarder[forwarder<br/>gRPC only<br/>active subscriber/session routing]
     uploader[uploader<br/>HTTP /api/uploader<br/>proxy, presigned, chunked uploads]
+    presence[presence<br/>HTTP + gRPC + WebSocket<br/>online state, heartbeats, last-seen]
+    notification[notification<br/>HTTP + gRPC + WebSocket<br/>inbox, unread counts, push]
+    call[call<br/>HTTP + gRPC + WebSocket<br/>WebRTC signaling, TURN, call state]
   end
 
   subgraph ai[Python AI service]
@@ -63,9 +66,15 @@ flowchart TB
   user --> redis
   match --> redis
   chat --> redis
+  presence --> redis
+  call --> redis
   chat --> cassandra
+  notification --> cassandra
+  call --> cassandra
   chat --> kafka
   forwarder --> kafka
+  notification --> kafka
+  call --> kafka
   uploader --> minio
   aisvc --> postgres
   aisvc --> redis
@@ -79,6 +88,9 @@ flowchart TB
   chat -. metrics/traces .-> prom
   forwarder -. metrics/traces .-> prom
   uploader -. metrics/traces .-> prom
+  presence -. metrics/traces .-> prom
+  notification -. metrics/traces .-> prom
+  call -. metrics/traces .-> prom
   aisvc -. metrics .-> prom
   web -. traces .-> jaeger
   chat -. traces .-> jaeger
@@ -158,11 +170,13 @@ flowchart LR
   build --> apiimg["nexuschat-api:&lt;tag&gt;"]
   build --> webimg["nexuschat-web:&lt;tag&gt;"]
   build --> aiimg["nexuschat-ai-service:&lt;tag&gt;"]
+  build --> realtime["nexuschat-presence:&lt;tag&gt;<br/>nexuschat-notification:&lt;tag&gt;<br/>nexuschat-call:&lt;tag&gt;"]
   build --> proxy["Proxy/lab variants<br/>api:proxy-upload-*<br/>web:proxy-upload-*<br/>web:proxy-upload-v2-*"]
 
   apiimg --> scan[Image Trivy scan]
   webimg --> scan
   aiimg --> scan
+  realtime --> scan
   proxy --> scan
   scan --> sbom[Generate SBOM]
   sbom --> sign[Cosign keyless signing]
@@ -173,7 +187,7 @@ flowchart LR
   deploy -->|yes| runner[Self-hosted runner<br/>labels: self-hosted, linux, x64, k3s-lab]
   runner --> kubeconfig[Use KUBE_CONFIG_B64<br/>or existing runner kubeconfig]
   kubeconfig --> helmdeploy[helm upgrade --install nexuschat<br/>namespace nexuschat-lab<br/>values.yaml + values-lab-k3s.yaml]
-  helmdeploy --> rollout[Wait for web, chat, match, user,<br/>uploader, forwarder, ai-service]
+  helmdeploy --> rollout[Wait for web, chat, match, user,<br/>uploader, forwarder, ai-service,<br/>presence, notification, call]
   rollout --> smoke[Print live images and run smoke checks]
 ```
 
@@ -436,6 +450,9 @@ Run individual Go services locally after building the binary. They still need th
 ./server chat
 ./server uploader
 ./server forwarder
+./server presence
+./server notification
+./server call
 ```
 
 Build Docker images manually:
@@ -443,7 +460,8 @@ Build Docker images manually:
 ```bash
 make docker-api
 make docker-web
-# or both:
+make docker-realtime
+# or api + web:
 make docker
 ```
 
@@ -452,6 +470,9 @@ The Makefile tags those local images as:
 ```text
 tuananh165/nexuschat-api:kafka
 tuananh165/nexuschat-web:kafka
+tuananh165/nexuschat-presence:v0.0.0
+tuananh165/nexuschat-notification:v0.0.0
+tuananh165/nexuschat-call:v0.0.0
 ```
 
 ### 3. Build, run, and test the frontend
@@ -552,7 +573,7 @@ Target lab defaults documented in this repository:
 | Chart | `deployments/helm/nexuschat` |
 | Lab values | `deployments/helm/nexuschat/values-lab-k3s.yaml` |
 | Ingress controller | ingress-nginx |
-| Lab IP | `192.168.109.131` |
+| Lab IP | `IP` |
 
 Create or update the runtime secret before deploying. Use real values for OAuth and AI features:
 
@@ -605,8 +626,8 @@ for deploy in web chat match user uploader forwarder ai-service; do
   kubectl -n nexuschat-lab rollout status deployment/$deploy --timeout=600s
 done
 
-curl -I http://192.168.109.131
-curl -i http://192.168.109.131/api/ai/health
+curl -I http://IP
+curl -i http://IP/api/ai/health
 ```
 
 Rollback:

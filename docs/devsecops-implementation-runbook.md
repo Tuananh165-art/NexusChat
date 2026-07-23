@@ -172,7 +172,7 @@ for deploy in web chat match user uploader forwarder ai-service presence notific
 done
 
 curl -I https://nexuschat.click
-curl -i http://192.168.109.131/api/ai/health
+curl -i http://IP/api/ai/health
 ```
 
 If using `nip.io` lab hostnames from `deployments/platform/UI-ACCESS.md`, also check dashboard ingresses.
