@@ -475,6 +475,11 @@ jobs:
         env:
           TAG: ${{ steps.vars.outputs.tag }}
         run: |
+          # Do not use helm --wait/--atomic here. Helm waits on cert-manager
+          # Certificate readiness too, and Let's Encrypt HTTP-01 can remain
+          # InProgress while DNS/public reachability is being fixed. The next
+          # steps wait on runtime workloads explicitly so app rollout failures
+          # still fail the pipeline with clearer diagnostics.
           helm upgrade --install nexuschat deployments/helm/nexuschat \
             --namespace "$KUBE_NAMESPACE" \
             --create-namespace \
@@ -483,9 +488,7 @@ jobs:
             --set-string imageDefaults.tag="${TAG}" \
             --set-string services.web.image.fullname=docker.io/tuananh165/nexuschat-web:proxy-upload-v2-${TAG} \
             --set-string services.uploader.image.fullname=docker.io/tuananh165/nexuschat-api:proxy-upload-${TAG} \
-            --timeout 10m \
-            --atomic \
-            --wait
+            --timeout 10m
 
       - name: Wait for deployments
         run: |
@@ -493,6 +496,16 @@ jobs:
             echo "Waiting for rollout: $deploy"
             kubectl -n "$KUBE_NAMESPACE" rollout status deployment/$deploy --timeout=600s
           done
+
+      - name: Wait for coturn daemonset
+        run: |
+          kubectl -n "$KUBE_NAMESPACE" rollout status daemonset/coturn --timeout=180s
+
+      - name: Show TLS certificate status
+        if: always()
+        run: |
+          kubectl -n "$KUBE_NAMESPACE" get certificate,certificaterequest,order,challenge -o wide || true
+          kubectl -n "$KUBE_NAMESPACE" describe certificate nexuschat-click-tls || true
 
       - name: Show deployed images
         run: |
