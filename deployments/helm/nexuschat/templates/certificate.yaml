@@ -1,0 +1,25 @@
+{{- if .Values.certManager.enabled }}
+{{- $domain := .Values.global.domain }}
+{{- $secretName := default .Values.global.tlsSecretName .Values.certManager.certificate.secretName }}
+{{- if and .Values.certManager.certificate.create $domain $secretName }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $secretName }}
+  labels:
+    {{- include "nexuschat.labels" . | nindent 4 }}
+spec:
+  secretName: {{ $secretName }}
+  issuerRef:
+    kind: ClusterIssuer
+    name: {{ .Values.certManager.clusterIssuer.name }}
+  dnsNames:
+    - {{ $domain | quote }}
+    {{- range .Values.certManager.certificate.dnsNames }}
+    {{- if ne . $domain }}
+    - {{ . | quote }}
+    {{- end }}
+    {{- end }}
+{{- end }}
+{{- end }}

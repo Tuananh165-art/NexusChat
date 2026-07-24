@@ -345,6 +345,52 @@ kubectl get pods -n minio
 kubectl get pods -n postgres
 ```
 
+## 6.1. Enable HTTPS with cert-manager and Let's Encrypt
+
+Chrome/Edge require a secure origin for Web Push. The lab Helm values use host `nexuschat.click` and TLS secret `nexuschat-click-tls`, so install cert-manager and let Let's Encrypt populate that secret.
+
+Prerequisite: public DNS for `nexuschat.click` must resolve to the ingress IP `192.168.109.131` from both the cluster and Let's Encrypt. If DNS is missing, cert-manager will stay pending with an HTTP-01 self-check error like `lookup nexuschat.click ... no such host`.
+
+```bash
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+
+helm upgrade --install cert-manager jetstack/cert-manager \
+  --namespace cert-manager \
+  --create-namespace \
+  --set crds.enabled=true \
+  --wait \
+  --timeout 5m
+
+kubectl wait --for=condition=Established \
+  crd/certificates.cert-manager.io \
+  crd/clusterissuers.cert-manager.io \
+  --timeout=120s
+```
+
+The chart renders:
+
+- `ClusterIssuer/letsencrypt-prod`, using HTTP-01 through ingress class `nginx`.
+- `Certificate/nexuschat-click-tls` in namespace `nexuschat-lab`.
+- Ingress TLS references to secret `nexuschat-click-tls`.
+
+After Helm deploy, verify issuance:
+
+```bash
+kubectl get clusterissuer letsencrypt-prod -o wide
+kubectl -n nexuschat-lab get certificate,certificaterequest,order,challenge -o wide
+kubectl -n nexuschat-lab describe certificate nexuschat-click-tls
+kubectl -n nexuschat-lab get secret nexuschat-click-tls
+```
+
+Expected final state:
+
+```text
+ClusterIssuer/letsencrypt-prod READY=True
+Certificate/nexuschat-click-tls READY=True
+secret/nexuschat-click-tls exists
+```
+
 ## 7. Create runtime secret
 
 Use real OAuth/AI values if testing those features. Placeholders allow pods to start but will not make OAuth/AI work.
@@ -355,10 +401,12 @@ export GOOGLE_CLIENT_SECRET='replace-me'
 export AI_ENDPOINT='https://replace-me-openai-compatible/v1'
 export AI_API_KEY='replace-me'
 export AI_MODEL='replace-me'
+export CALL_TURN_SHAREDSECRET='lab-turn-secret-change-me'
 
 kubectl create secret generic nexuschat-runtime \
   --namespace nexuschat-lab \
   --from-literal=CHAT_JWT_SECRET='lab-jwt-secret-change-me' \
+  --from-literal=CALL_TURN_SHAREDSECRET="$CALL_TURN_SHAREDSECRET" \
   --from-literal=REDIS_PASSWORD="$REDIS_PASSWORD" \
   --from-literal=CASSANDRA_USER='admin' \
   --from-literal=CASSANDRA_PASSWORD="$CASSANDRA_PASSWORD" \
@@ -411,6 +459,14 @@ DOCKER_USERNAME
 DOCKER_PASSWORD
 KUBE_CONFIG_B64
 ```
+
+Optional but recommended if `turn.enabled=true` in the lab values:
+
+```text
+CALL_TURN_SHAREDSECRET
+```
+
+If `CALL_TURN_SHAREDSECRET` is not configured as a GitHub secret, the deploy job generates a random value and patches only the `CALL_TURN_SHAREDSECRET` key into `nexuschat-runtime` before Helm runs. This prevents the `coturn` DaemonSet from getting stuck before the release finishes.
 
 `KUBE_CONFIG_B64` may be empty only if the self-hosted runner already has a working kubeconfig. Current job runs on:
 
