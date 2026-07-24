@@ -499,7 +499,11 @@ jobs:
 
       - name: Wait for coturn daemonset
         run: |
-          kubectl -n "$KUBE_NAMESPACE" rollout status daemonset/coturn --timeout=180s
+          if kubectl -n "$KUBE_NAMESPACE" get daemonset/coturn >/dev/null 2>&1; then
+            kubectl -n "$KUBE_NAMESPACE" rollout status daemonset/coturn --timeout=180s
+          else
+            echo "coturn DaemonSet is not rendered in this lab profile; skipping TURN rollout wait."
+          fi
 
       - name: Show TLS certificate status
         if: always()
