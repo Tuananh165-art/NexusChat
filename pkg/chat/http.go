@@ -141,6 +141,14 @@ func (r *HttpServer) RegisterRoutes() {
 		{
 			aiGroup.POST("/rewrite", r.RewriteWithAI)
 		}
+		roomGroup := chatGroup.Group("/rooms")
+		{
+			roomGroup.GET("", r.ListRooms)
+			roomGroup.POST("", r.CreateRoom)
+			roomGroup.POST("/join", r.JoinRoom)
+			roomGroup.POST("/:channelId/open", r.OpenRoom)
+			roomGroup.POST("/:channelId/leave", r.LeaveRoom)
+		}
 	}
 	r.mc.HandleMessage(r.HandleChatOnMessage)
 	r.mc.HandleConnect(r.HandleChatOnConnect)

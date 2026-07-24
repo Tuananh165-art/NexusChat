@@ -2,9 +2,11 @@ package chat
 
 import (
 	"context"
+	"crypto/rand"
 	b64 "encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -55,6 +57,12 @@ type ChannelRepo interface {
 	DeleteChannel(ctx context.Context, channelID uint64) error
 	AssignRole(ctx context.Context, channelID, userID uint64, role Role) error
 	GetRole(ctx context.Context, channelID, userID uint64) (Role, error)
+	CreateRoom(ctx context.Context, room *Room) error
+	GetRoom(ctx context.Context, channelID uint64) (*Room, error)
+	GetRoomByInviteCode(ctx context.Context, inviteCode string) (*Room, error)
+	ListRoomsByUser(ctx context.Context, userID uint64) ([]Room, error)
+	AddRoomMember(ctx context.Context, room *Room, userID uint64, role Role) error
+	RemoveRoomMember(ctx context.Context, channelID, userID uint64) error
 }
 
 type ForwardRepo interface {
@@ -463,6 +471,148 @@ func (repo *ChannelRepoImpl) GetRole(ctx context.Context, channelID, userID uint
 		return "", err
 	}
 	return Role(role), nil
+}
+
+func (repo *ChannelRepoImpl) CreateRoom(ctx context.Context, room *Room) error {
+	now := time.Now().UTC()
+	room.CreatedAt = now
+	room.UpdatedAt = now
+	if room.MemberCount == 0 {
+		room.MemberCount = 1
+	}
+	if room.InviteCode == "" {
+		code, err := newInviteCode()
+		if err != nil {
+			return err
+		}
+		room.InviteCode = code
+	}
+	if err := repo.s.Query("INSERT INTO chat_rooms_by_id (channel_id, name, owner_id, invite_code, member_count, archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		room.ChannelID, room.Name, room.OwnerID, room.InviteCode, room.MemberCount, false, room.CreatedAt, room.UpdatedAt).WithContext(ctx).Exec(); err != nil {
+		return err
+	}
+	if err := repo.s.Query("INSERT INTO chat_room_invites (invite_code, channel_id, created_by, created_at) VALUES (?, ?, ?, ?)",
+		room.InviteCode, room.ChannelID, room.OwnerID, room.CreatedAt).WithContext(ctx).Exec(); err != nil {
+		return err
+	}
+	return repo.AddRoomMember(ctx, room, room.OwnerID, RoleOwner)
+}
+
+func (repo *ChannelRepoImpl) GetRoom(ctx context.Context, channelID uint64) (*Room, error) {
+	var room Room
+	var archived bool
+	err := repo.s.Query("SELECT channel_id, name, owner_id, invite_code, member_count, created_at, updated_at, archived FROM chat_rooms_by_id WHERE channel_id = ? LIMIT 1",
+		channelID).WithContext(ctx).Idempotent(true).Scan(&room.ChannelID, &room.Name, &room.OwnerID, &room.InviteCode, &room.MemberCount, &room.CreatedAt, &room.UpdatedAt, &archived)
+	if err != nil {
+		return nil, err
+	}
+	if archived {
+		return nil, gocql.ErrNotFound
+	}
+	return &room, nil
+}
+
+func (repo *ChannelRepoImpl) GetRoomByInviteCode(ctx context.Context, inviteCode string) (*Room, error) {
+	var channelID uint64
+	if err := repo.s.Query("SELECT channel_id FROM chat_room_invites WHERE invite_code = ? LIMIT 1", inviteCode).
+		WithContext(ctx).Idempotent(true).Scan(&channelID); err != nil {
+		return nil, err
+	}
+	return repo.GetRoom(ctx, channelID)
+}
+
+func (repo *ChannelRepoImpl) ListRoomsByUser(ctx context.Context, userID uint64) ([]Room, error) {
+	iter := repo.s.Query("SELECT updated_at, channel_id, name, owner_id, invite_code, member_count, role FROM chat_rooms_by_user WHERE user_id = ? LIMIT 100", userID).
+		WithContext(ctx).Idempotent(true).Iter()
+	rooms := []Room{}
+	seen := map[uint64]bool{}
+	var room Room
+	for iter.Scan(&room.UpdatedAt, &room.ChannelID, &room.Name, &room.OwnerID, &room.InviteCode, &room.MemberCount, &room.Role) {
+		if seen[room.ChannelID] {
+			room = Room{}
+			continue
+		}
+		seen[room.ChannelID] = true
+		if latest, err := repo.GetRoom(ctx, room.ChannelID); err == nil {
+			latest.Role = room.Role
+			room = *latest
+		}
+		rooms = append(rooms, room)
+		room = Room{}
+	}
+	if err := iter.Close(); err != nil {
+		return nil, err
+	}
+	return rooms, nil
+}
+
+func (repo *ChannelRepoImpl) AddRoomMember(ctx context.Context, room *Room, userID uint64, role Role) error {
+	now := time.Now().UTC()
+	if err := repo.s.Query("INSERT INTO channels (id, user_id) VALUES (?, ?)", room.ChannelID, userID).WithContext(ctx).Exec(); err != nil {
+		return err
+	}
+	if err := repo.AssignRole(ctx, room.ChannelID, userID, role); err != nil {
+		return err
+	}
+	count, err := repo.countChannelMembers(ctx, room.ChannelID)
+	if err == nil {
+		room.MemberCount = count
+		room.UpdatedAt = now
+		_ = repo.s.Query("UPDATE chat_rooms_by_id SET member_count = ?, updated_at = ? WHERE channel_id = ?", count, now, room.ChannelID).WithContext(ctx).Exec()
+	}
+	return repo.s.Query("INSERT INTO chat_rooms_by_user (user_id, updated_at, channel_id, name, owner_id, invite_code, member_count, role) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		userID, now, room.ChannelID, room.Name, room.OwnerID, room.InviteCode, room.MemberCount, string(role)).WithContext(ctx).Exec()
+}
+
+func (repo *ChannelRepoImpl) RemoveRoomMember(ctx context.Context, channelID, userID uint64) error {
+	iter := repo.s.Query("SELECT updated_at FROM chat_rooms_by_user WHERE user_id = ? ALLOW FILTERING", userID).WithContext(ctx).Iter()
+	var updatedAt time.Time
+	for iter.Scan(&updatedAt) {
+		var roomID uint64
+		if err := repo.s.Query("SELECT channel_id FROM chat_rooms_by_user WHERE user_id = ? AND updated_at = ? LIMIT 1", userID, updatedAt).
+			WithContext(ctx).Scan(&roomID); err == nil && roomID == channelID {
+			_ = repo.s.Query("DELETE FROM chat_rooms_by_user WHERE user_id = ? AND updated_at = ?", userID, updatedAt).WithContext(ctx).Exec()
+		}
+	}
+	if err := iter.Close(); err != nil {
+		return err
+	}
+	if err := repo.s.Query("DELETE FROM channels WHERE id = ? AND user_id = ?", channelID, userID).WithContext(ctx).Exec(); err != nil {
+		return err
+	}
+	if err := repo.s.Query("DELETE FROM channel_roles WHERE channel_id = ? AND user_id = ?", channelID, userID).WithContext(ctx).Exec(); err != nil {
+		return err
+	}
+	if count, err := repo.countChannelMembers(ctx, channelID); err == nil {
+		_ = repo.s.Query("UPDATE chat_rooms_by_id SET member_count = ?, updated_at = ? WHERE channel_id = ?", count, time.Now().UTC(), channelID).WithContext(ctx).Exec()
+	}
+	return nil
+}
+
+func (repo *ChannelRepoImpl) countChannelMembers(ctx context.Context, channelID uint64) (int, error) {
+	iter := repo.s.Query("SELECT user_id FROM channels WHERE id = ?", channelID).WithContext(ctx).Idempotent(true).Iter()
+	count := 0
+	var userID uint64
+	for iter.Scan(&userID) {
+		if userID != 0 {
+			count++
+		}
+	}
+	return count, iter.Close()
+}
+
+func newInviteCode() (string, error) {
+	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	const length = 8
+	var b strings.Builder
+	for i := 0; i < length; i++ {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
+		if err != nil {
+			return "", err
+		}
+		b.WriteByte(alphabet[n.Int64()])
+	}
+	return b.String(), nil
 }
 
 type ForwardRepoImpl struct {

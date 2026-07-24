@@ -38,7 +38,7 @@ func CorsMiddleware() gin.HandlerFunc {
 	config := cors.Config{
 		AllowAllOrigins:  true,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", JWTAuthHeader},
+		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", JWTAuthHeader, ChannelIdHeader, "X-User-Id"},
 		AllowCredentials: false,
 		MaxAge:           12 * time.Hour,
 	}

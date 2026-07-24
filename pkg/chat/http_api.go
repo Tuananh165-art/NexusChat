@@ -5,11 +5,187 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Tuananh165-art/NexusChat/pkg/common"
 	"github.com/gin-gonic/gin"
 	"gopkg.in/olahol/melody.v1"
 )
+
+type CreateRoomRequest struct {
+	Name      string   `json:"name"`
+	MemberIDs []string `json:"member_ids"`
+}
+
+type JoinRoomRequest struct {
+	InviteCode string `json:"invite_code"`
+}
+
+type RoomPresenter struct {
+	ChannelID   string `json:"channel_id"`
+	Name        string `json:"name"`
+	OwnerID     string `json:"owner_id"`
+	InviteCode  string `json:"invite_code"`
+	MemberCount int    `json:"member_count"`
+	Role        string `json:"role,omitempty"`
+	CreatedAt   int64  `json:"created_at,omitempty"`
+	UpdatedAt   int64  `json:"updated_at,omitempty"`
+}
+
+type RoomsPresenter struct {
+	Rooms []RoomPresenter `json:"rooms"`
+}
+
+type OpenRoomPresenter struct {
+	ChannelID   string `json:"channel_id"`
+	AccessToken string `json:"access_token"`
+}
+
+func currentUserID(c *gin.Context) (uint64, error) {
+	raw := c.GetHeader("X-User-Id")
+	if raw == "" {
+		raw = c.Query("uid")
+	}
+	return strconv.ParseUint(raw, 10, 64)
+}
+
+func parseMemberIDs(values []string) ([]uint64, error) {
+	members := make([]uint64, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		id, err := strconv.ParseUint(value, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		members = append(members, id)
+	}
+	return members, nil
+}
+
+func roomPresenter(room Room) RoomPresenter {
+	return RoomPresenter{
+		ChannelID:   strconv.FormatUint(room.ChannelID, 10),
+		Name:        room.Name,
+		OwnerID:     strconv.FormatUint(room.OwnerID, 10),
+		InviteCode:  room.InviteCode,
+		MemberCount: room.MemberCount,
+		Role:        string(room.Role),
+		CreatedAt:   room.CreatedAt.UnixMilli(),
+		UpdatedAt:   room.UpdatedAt.UnixMilli(),
+	}
+}
+
+func (r *HttpServer) ListRooms(c *gin.Context) {
+	userID, err := currentUserID(c)
+	if err != nil || userID == 0 {
+		response(c, http.StatusUnauthorized, common.ErrUnauthorized)
+		return
+	}
+	rooms, err := r.chanSvc.ListRooms(c.Request.Context(), userID)
+	if err != nil {
+		r.logger.Error(err.Error())
+		response(c, http.StatusInternalServerError, common.ErrServer)
+		return
+	}
+	presenters := make([]RoomPresenter, 0, len(rooms))
+	for _, room := range rooms {
+		presenters = append(presenters, roomPresenter(room))
+	}
+	c.JSON(http.StatusOK, RoomsPresenter{Rooms: presenters})
+}
+
+func (r *HttpServer) CreateRoom(c *gin.Context) {
+	userID, err := currentUserID(c)
+	if err != nil || userID == 0 {
+		response(c, http.StatusUnauthorized, common.ErrUnauthorized)
+		return
+	}
+	var req CreateRoomRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response(c, http.StatusBadRequest, common.ErrInvalidParam)
+		return
+	}
+	memberIDs, err := parseMemberIDs(req.MemberIDs)
+	if err != nil {
+		response(c, http.StatusBadRequest, common.ErrInvalidParam)
+		return
+	}
+	room, err := r.chanSvc.CreateRoom(c.Request.Context(), userID, req.Name, memberIDs)
+	if err != nil {
+		r.logger.Error(err.Error())
+		response(c, http.StatusBadRequest, err)
+		return
+	}
+	_ = r.msgSvc.BroadcastActionMessage(c.Request.Context(), room.ChannelID, userID, JoinedMessage)
+	c.JSON(http.StatusCreated, roomPresenter(*room))
+}
+
+func (r *HttpServer) JoinRoom(c *gin.Context) {
+	userID, err := currentUserID(c)
+	if err != nil || userID == 0 {
+		response(c, http.StatusUnauthorized, common.ErrUnauthorized)
+		return
+	}
+	var req JoinRoomRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response(c, http.StatusBadRequest, common.ErrInvalidParam)
+		return
+	}
+	room, err := r.chanSvc.JoinRoom(c.Request.Context(), userID, req.InviteCode)
+	if err != nil {
+		r.logger.Error(err.Error())
+		response(c, http.StatusBadRequest, err)
+		return
+	}
+	_ = r.msgSvc.BroadcastActionMessage(c.Request.Context(), room.ChannelID, userID, JoinedMessage)
+	c.JSON(http.StatusOK, roomPresenter(*room))
+}
+
+func (r *HttpServer) OpenRoom(c *gin.Context) {
+	userID, err := currentUserID(c)
+	if err != nil || userID == 0 {
+		response(c, http.StatusUnauthorized, common.ErrUnauthorized)
+		return
+	}
+	channelID, err := strconv.ParseUint(c.Param("channelId"), 10, 64)
+	if err != nil {
+		response(c, http.StatusBadRequest, common.ErrInvalidParam)
+		return
+	}
+	channel, err := r.chanSvc.OpenRoom(c.Request.Context(), userID, channelID)
+	if err != nil {
+		r.logger.Error(err.Error())
+		response(c, http.StatusForbidden, err)
+		return
+	}
+	c.JSON(http.StatusOK, OpenRoomPresenter{
+		ChannelID:   strconv.FormatUint(channel.ID, 10),
+		AccessToken: channel.AccessToken,
+	})
+}
+
+func (r *HttpServer) LeaveRoom(c *gin.Context) {
+	userID, err := currentUserID(c)
+	if err != nil || userID == 0 {
+		response(c, http.StatusUnauthorized, common.ErrUnauthorized)
+		return
+	}
+	channelID, err := strconv.ParseUint(c.Param("channelId"), 10, 64)
+	if err != nil {
+		response(c, http.StatusBadRequest, common.ErrInvalidParam)
+		return
+	}
+	if err := r.chanSvc.LeaveRoom(c.Request.Context(), userID, channelID); err != nil {
+		r.logger.Error(err.Error())
+		response(c, http.StatusBadRequest, err)
+		return
+	}
+	_ = r.msgSvc.BroadcastActionMessage(c.Request.Context(), channelID, userID, LeavedMessage)
+	c.JSON(http.StatusOK, common.SuccessMessage{Message: "ok"})
+}
 
 // @Summary Start a chat
 // @Description Websocket initialization endpoint for starting a chat

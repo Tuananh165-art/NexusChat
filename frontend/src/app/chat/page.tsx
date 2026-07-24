@@ -59,6 +59,7 @@ import TypingIndicator from "@/components/TypingIndicator";
 import AnimatedBackground from "@/components/AnimatedBackground";
 import GalleryItem from "@/components/GalleryItem";
 import RealtimePanel from "@/components/RealtimePanel";
+import RoomsPanel from "@/components/RoomsPanel";
 
 interface PeerInfo {
   name: string;
@@ -697,6 +698,23 @@ export default function ChatPage() {
     }
   }, [clearDraft, router, ws]);
 
+  const handleOpenRoom = useCallback((token: string) => {
+    const uid = userIdRef.current;
+    if (!uid || !token) return;
+    localStorage.setItem(ACCESS_TOKEN_KEY, token);
+    setAccessToken(token);
+    accessTokenRef.current = token;
+    setMessages([]);
+    setPinnedMessages([]);
+    setPageState("");
+    setHasMoreMessages(true);
+    peerMessagesRef.current = [];
+    ws.disconnect();
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    ws.connect(`${protocol}//${window.location.host}/api/chat?uid=${uid}&access_token=${token}`);
+    setConnectionStatus("connecting");
+  }, [ws]);
+
   const loadMoreMessages = useCallback(async () => {
     if (isLoadingMore || !hasMoreMessages) return;
     setIsLoadingMore(true);
@@ -1085,6 +1103,7 @@ export default function ChatPage() {
           </div>
 
           <div className="flex items-center gap-1 sm:gap-2">
+            <RoomsPanel userId={userId} onOpenRoom={handleOpenRoom} />
             <RealtimePanel userId={userId} accessToken={accessToken} />
             <motion.button
               whileHover={{ scale: 1.05 }}

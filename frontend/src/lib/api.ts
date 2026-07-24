@@ -7,19 +7,24 @@ import type {
   PresignedUploadResult,
   PresignedDownloadResult,
   PinnedMessage,
+  MatchResult,
 } from "./constants";
-
 function getAccessToken(): string {
   if (typeof window === "undefined") return "";
   return localStorage.getItem(ACCESS_TOKEN_KEY) || "";
 }
 
+function getCurrentUserId(): string {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem("rc:userid") || "";
+}
+
 function authHeaders(userId?: string): HeadersInit {
   const token = getAccessToken();
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
-  };
-  if (userId) headers["X-User-Id"] = userId;
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const resolvedUserId = userId || getCurrentUserId();
+  if (resolvedUserId) headers["X-User-Id"] = resolvedUserId;
   return headers;
 }
 
@@ -185,6 +190,52 @@ export interface WorkspaceItem {
   priority?: string;
   message_id?: string;
   channel_id?: string;
+}
+
+export interface ChatRoom {
+  channel_id: string;
+  name: string;
+  owner_id: string;
+  invite_code: string;
+  member_count: number;
+  role?: string;
+  created_at?: number;
+  updated_at?: number;
+}
+
+export async function fetchRooms(): Promise<ChatRoom[]> {
+  const res = await fetch("/api/chat/rooms", { headers: authHeaders() });
+  if (!res.ok) throw new Error(res.statusText);
+  return (await res.json()).rooms || [];
+}
+
+export async function createRoom(input: { name: string; member_ids?: string[] }): Promise<ChatRoom> {
+  const res = await fetch("/api/chat/rooms", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
+}
+
+export async function joinRoom(inviteCode: string): Promise<ChatRoom> {
+  const res = await fetch("/api/chat/rooms/join", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ invite_code: inviteCode }),
+  });
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
+}
+
+export async function openRoom(channelId: string): Promise<MatchResult> {
+  const res = await fetch(`/api/chat/rooms/${encodeURIComponent(channelId)}/open`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
 }
 
 export async function fetchWorkspaceItems(): Promise<WorkspaceItem[]> {

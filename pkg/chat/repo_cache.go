@@ -46,6 +46,12 @@ type ChannelRepoCache interface {
 	DeleteChannel(ctx context.Context, channelID uint64) error
 	AssignRole(ctx context.Context, channelID, userID uint64, role Role) error
 	GetRole(ctx context.Context, channelID, userID uint64) (Role, error)
+	CreateRoom(ctx context.Context, room *Room) error
+	GetRoom(ctx context.Context, channelID uint64) (*Room, error)
+	GetRoomByInviteCode(ctx context.Context, inviteCode string) (*Room, error)
+	ListRoomsByUser(ctx context.Context, userID uint64) ([]Room, error)
+	AddRoomMember(ctx context.Context, room *Room, userID uint64, role Role) error
+	RemoveRoomMember(ctx context.Context, channelID, userID uint64) error
 }
 
 type UserRepoCacheImpl struct {
@@ -246,6 +252,33 @@ func (cache *ChannelRepoCacheImpl) AssignRole(ctx context.Context, channelID, us
 }
 func (cache *ChannelRepoCacheImpl) GetRole(ctx context.Context, channelID, userID uint64) (Role, error) {
 	return cache.channelRepo.GetRole(ctx, channelID, userID)
+}
+func (cache *ChannelRepoCacheImpl) CreateRoom(ctx context.Context, room *Room) error {
+	if err := cache.channelRepo.CreateRoom(ctx, room); err != nil {
+		return err
+	}
+	return cache.r.HSet(ctx, constructKey(channelUsersPrefix, room.ChannelID), strconv.FormatUint(room.OwnerID, 10), 1)
+}
+func (cache *ChannelRepoCacheImpl) GetRoom(ctx context.Context, channelID uint64) (*Room, error) {
+	return cache.channelRepo.GetRoom(ctx, channelID)
+}
+func (cache *ChannelRepoCacheImpl) GetRoomByInviteCode(ctx context.Context, inviteCode string) (*Room, error) {
+	return cache.channelRepo.GetRoomByInviteCode(ctx, inviteCode)
+}
+func (cache *ChannelRepoCacheImpl) ListRoomsByUser(ctx context.Context, userID uint64) ([]Room, error) {
+	return cache.channelRepo.ListRoomsByUser(ctx, userID)
+}
+func (cache *ChannelRepoCacheImpl) AddRoomMember(ctx context.Context, room *Room, userID uint64, role Role) error {
+	if err := cache.channelRepo.AddRoomMember(ctx, room, userID, role); err != nil {
+		return err
+	}
+	return cache.r.HSet(ctx, constructKey(channelUsersPrefix, room.ChannelID), strconv.FormatUint(userID, 10), 1)
+}
+func (cache *ChannelRepoCacheImpl) RemoveRoomMember(ctx context.Context, channelID, userID uint64) error {
+	if err := cache.channelRepo.RemoveRoomMember(ctx, channelID, userID); err != nil {
+		return err
+	}
+	return cache.r.HDel(ctx, constructKey(channelUsersPrefix, channelID), strconv.FormatUint(userID, 10))
 }
 
 func constructKey(prefix string, id uint64) string {

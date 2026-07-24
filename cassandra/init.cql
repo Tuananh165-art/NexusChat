@@ -55,6 +55,37 @@ CREATE TABLE IF NOT EXISTS channel_roles (
     PRIMARY KEY (channel_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS chat_rooms_by_id (
+    channel_id bigint PRIMARY KEY,
+    name text,
+    owner_id bigint,
+    invite_code text,
+    member_count int,
+    archived boolean,
+    created_at timestamp,
+    updated_at timestamp
+);
+
+CREATE TABLE IF NOT EXISTS chat_rooms_by_user (
+    user_id bigint,
+    updated_at timestamp,
+    channel_id bigint,
+    name text,
+    owner_id bigint,
+    invite_code text,
+    member_count int,
+    role text,
+    PRIMARY KEY (user_id, updated_at, channel_id)
+) WITH CLUSTERING ORDER BY (updated_at DESC, channel_id DESC);
+
+CREATE TABLE IF NOT EXISTS chat_room_invites (
+    invite_code text PRIMARY KEY,
+    channel_id bigint,
+    created_by bigint,
+    created_at timestamp,
+    expires_at timestamp
+);
+
 CREATE TABLE IF NOT EXISTS safety_rules (
     rule_id text PRIMARY KEY,
     name text,

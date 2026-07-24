@@ -55,6 +55,11 @@ type ChannelService interface {
 	DeleteChannel(ctx context.Context, channelID uint64) error
 	AssignRole(ctx context.Context, channelID, userID uint64, role Role) error
 	GetRole(ctx context.Context, channelID, userID uint64) (Role, error)
+	CreateRoom(ctx context.Context, ownerID uint64, name string, memberIDs []uint64) (*Room, error)
+	JoinRoom(ctx context.Context, userID uint64, inviteCode string) (*Room, error)
+	ListRooms(ctx context.Context, userID uint64) ([]Room, error)
+	OpenRoom(ctx context.Context, userID, channelID uint64) (*Channel, error)
+	LeaveRoom(ctx context.Context, userID, channelID uint64) error
 }
 
 type ForwardService interface {
@@ -401,6 +406,111 @@ func (svc *ChannelServiceImpl) AssignRole(ctx context.Context, channelID, userID
 }
 func (svc *ChannelServiceImpl) GetRole(ctx context.Context, channelID, userID uint64) (Role, error) {
 	return svc.chanRepo.GetRole(ctx, channelID, userID)
+}
+func (svc *ChannelServiceImpl) CreateRoom(ctx context.Context, ownerID uint64, name string, memberIDs []uint64) (*Room, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("room name is required")
+	}
+	if len([]rune(name)) > 80 {
+		return nil, fmt.Errorf("room name is too long")
+	}
+	if _, err := svc.userRepo.GetUserByID(ctx, ownerID); err != nil {
+		return nil, err
+	}
+	channelID, err := svc.sf.NextID()
+	if err != nil {
+		return nil, fmt.Errorf("error create snowflake ID for new room: %w", err)
+	}
+	uniqueMembers := map[uint64]Role{ownerID: RoleOwner}
+	for _, memberID := range memberIDs {
+		if memberID == 0 || memberID == ownerID {
+			continue
+		}
+		if len(uniqueMembers) >= 50 {
+			return nil, fmt.Errorf("room member limit exceeded")
+		}
+		if _, err := svc.userRepo.GetUserByID(ctx, memberID); err != nil {
+			return nil, fmt.Errorf("member %d not found: %w", memberID, err)
+		}
+		uniqueMembers[memberID] = RoleMember
+	}
+	room := &Room{
+		ChannelID:   channelID,
+		Name:        name,
+		OwnerID:     ownerID,
+		MemberCount: len(uniqueMembers),
+	}
+	if err := svc.chanRepo.CreateRoom(ctx, room); err != nil {
+		return nil, fmt.Errorf("error create room: %w", err)
+	}
+	for memberID, role := range uniqueMembers {
+		if memberID == ownerID {
+			continue
+		}
+		if err := svc.chanRepo.AddRoomMember(ctx, room, memberID, role); err != nil {
+			return nil, fmt.Errorf("error add room member %d: %w", memberID, err)
+		}
+	}
+	room.Role = RoleOwner
+	return room, nil
+}
+func (svc *ChannelServiceImpl) JoinRoom(ctx context.Context, userID uint64, inviteCode string) (*Room, error) {
+	inviteCode = strings.ToUpper(strings.TrimSpace(inviteCode))
+	if inviteCode == "" {
+		return nil, fmt.Errorf("invite code is required")
+	}
+	if _, err := svc.userRepo.GetUserByID(ctx, userID); err != nil {
+		return nil, err
+	}
+	room, err := svc.chanRepo.GetRoomByInviteCode(ctx, inviteCode)
+	if err != nil {
+		return nil, fmt.Errorf("room invite not found: %w", err)
+	}
+	exists, err := svc.userRepo.IsChannelUserExist(ctx, room.ChannelID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		if err := svc.chanRepo.AddRoomMember(ctx, room, userID, RoleMember); err != nil {
+			return nil, err
+		}
+	}
+	room.Role = RoleMember
+	if userID == room.OwnerID {
+		room.Role = RoleOwner
+	}
+	return room, nil
+}
+func (svc *ChannelServiceImpl) ListRooms(ctx context.Context, userID uint64) ([]Room, error) {
+	return svc.chanRepo.ListRoomsByUser(ctx, userID)
+}
+func (svc *ChannelServiceImpl) OpenRoom(ctx context.Context, userID, channelID uint64) (*Channel, error) {
+	exists, err := svc.userRepo.IsChannelUserExist(ctx, channelID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrChannelOrUserNotFound
+	}
+	if _, err := svc.chanRepo.GetRoom(ctx, channelID); err != nil {
+		return nil, err
+	}
+	token, err := common.NewJWT(channelID)
+	if err != nil {
+		return nil, err
+	}
+	return &Channel{ID: channelID, AccessToken: token}, nil
+}
+func (svc *ChannelServiceImpl) LeaveRoom(ctx context.Context, userID, channelID uint64) error {
+	room, err := svc.chanRepo.GetRoom(ctx, channelID)
+	if err != nil {
+		return err
+	}
+	if room.OwnerID == userID {
+		return fmt.Errorf("room owner cannot leave; transfer ownership is not implemented")
+	}
+	return svc.chanRepo.RemoveRoomMember(ctx, channelID, userID)
 }
 
 type ForwardServiceImpl struct {

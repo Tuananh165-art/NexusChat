@@ -21,3 +21,6 @@ CREATE TABLE IF NOT EXISTS workspace_items_by_id (item_id text PRIMARY KEY, chan
 CREATE TABLE IF NOT EXISTS workspace_bookmarks_by_user (user_id bigint, created_at timestamp, item_id text, channel_id bigint, title text, tags set<text>, PRIMARY KEY ((user_id), created_at, item_id));
 CREATE TABLE IF NOT EXISTS workspace_collections_by_user (user_id bigint, collection_id text, name text, created_at timestamp, updated_at timestamp, PRIMARY KEY (user_id, collection_id));
 CREATE TABLE IF NOT EXISTS workspace_checklists_by_item (item_id text, checklist_id text, text text, done boolean, created_at timestamp, updated_at timestamp, PRIMARY KEY (item_id, checklist_id));
+CREATE TABLE IF NOT EXISTS chat_rooms_by_id (channel_id bigint PRIMARY KEY, name text, owner_id bigint, invite_code text, member_count int, archived boolean, created_at timestamp, updated_at timestamp);
+CREATE TABLE IF NOT EXISTS chat_rooms_by_user (user_id bigint, updated_at timestamp, channel_id bigint, name text, owner_id bigint, invite_code text, member_count int, role text, PRIMARY KEY (user_id, updated_at, channel_id)) WITH CLUSTERING ORDER BY (updated_at DESC, channel_id DESC);
+CREATE TABLE IF NOT EXISTS chat_room_invites (invite_code text PRIMARY KEY, channel_id bigint, created_by bigint, created_at timestamp, expires_at timestamp);

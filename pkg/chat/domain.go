@@ -3,6 +3,7 @@ package chat
 import (
 	"encoding/json"
 	"strconv"
+	"time"
 )
 
 const (
@@ -28,20 +29,20 @@ var (
 )
 
 type Message struct {
-	MessageID      uint64 `json:"message_id"`
-	Event          int    `json:"event"`
-	ChannelID      uint64 `json:"channel_id"`
-	UserID         uint64 `json:"user_id"`
-	Payload        string `json:"payload"`
-	Seen           bool   `json:"seen"`
-	Time           int64  `json:"time"`
-	EditedAt       int64  `json:"edited_at,omitempty"`
-	DeletedForAll  bool   `json:"deleted_for_all,omitempty"`
-	DeletedBy      uint64 `json:"deleted_by,omitempty"`
-	Reactions      []ReactionSummary `json:"reactions,omitempty"`
-	IsPinned       bool   `json:"is_pinned,omitempty"`
-	ParentID       uint64 `json:"parent_id,omitempty"`
-	ReplyPreview   *ReplyPreview     `json:"reply_preview,omitempty"`
+	MessageID     uint64            `json:"message_id"`
+	Event         int               `json:"event"`
+	ChannelID     uint64            `json:"channel_id"`
+	UserID        uint64            `json:"user_id"`
+	Payload       string            `json:"payload"`
+	Seen          bool              `json:"seen"`
+	Time          int64             `json:"time"`
+	EditedAt      int64             `json:"edited_at,omitempty"`
+	DeletedForAll bool              `json:"deleted_for_all,omitempty"`
+	DeletedBy     uint64            `json:"deleted_by,omitempty"`
+	Reactions     []ReactionSummary `json:"reactions,omitempty"`
+	IsPinned      bool              `json:"is_pinned,omitempty"`
+	ParentID      uint64            `json:"parent_id,omitempty"`
+	ReplyPreview  *ReplyPreview     `json:"reply_preview,omitempty"`
 }
 
 type ReplyPreview struct {
@@ -53,6 +54,17 @@ type ReplyPreview struct {
 type Channel struct {
 	ID          uint64
 	AccessToken string
+}
+
+type Room struct {
+	ChannelID   uint64    `json:"channel_id"`
+	Name        string    `json:"name"`
+	OwnerID     uint64    `json:"owner_id"`
+	InviteCode  string    `json:"invite_code"`
+	MemberCount int       `json:"member_count"`
+	Role        Role      `json:"role,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type User struct {
@@ -99,12 +111,12 @@ type ChannelRole struct {
 type Permission string
 
 const (
-	PermSendMessage    Permission = "send_message"
-	PermDeleteAny      Permission = "delete_any_message"
-	PermPinMessage     Permission = "pin_message"
-	PermManageRoles    Permission = "manage_roles"
-	PermUploadFile     Permission = "upload_file"
-	PermReact          Permission = "react"
+	PermSendMessage Permission = "send_message"
+	PermDeleteAny   Permission = "delete_any_message"
+	PermPinMessage  Permission = "pin_message"
+	PermManageRoles Permission = "manage_roles"
+	PermUploadFile  Permission = "upload_file"
+	PermReact       Permission = "react"
 )
 
 var RolePermissions = map[Role][]Permission{
