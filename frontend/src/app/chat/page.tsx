@@ -18,9 +18,6 @@ import {
   X,
   Search,
   Image,
-  Bell,
-  BellOff,
-  AtSign,
   Camera,
   Save,
   Sparkles,
@@ -49,8 +46,6 @@ import {
   chunkedUpload,
   searchMessages,
   fetchMediaMessages,
-  fetchNotificationPrefs,
-  setNotificationPrefs,
   rewriteWithAI,
   getFileExtension,
   isImageExtension,
@@ -69,7 +64,6 @@ interface PeerInfo {
   name: string;
   picture: string;
 }
-
 type ConnectionStatus = "connecting" | "connected" | "disconnected";
 type Msg = Message & { side: "left" | "right" };
 
@@ -99,9 +93,6 @@ export default function ChatPage() {
   const [galleryMessages, setGalleryMessages] = useState<Msg[]>([]);
   const [galleryType, setGalleryType] = useState("all");
   const [isSearching, setIsSearching] = useState(false);
-  const [notifPref, setNotifPref] = useState<string>("all");
-  const [showNotifSettings, setShowNotifSettings] = useState(false);
-  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("default");
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [profileName, setProfileName] = useState("");
   const [profilePicture, setProfilePicture] = useState("");
@@ -298,15 +289,12 @@ export default function ChatPage() {
 
   const shouldNotifyIncomingMessage = useCallback(
     (m: Message) => {
-      if (!isPageHiddenRef.current || notifPref === "mute") return false;
-      if (notifPref === "mentions") {
-        if (m.event !== EVENT_TEXT) return false;
-        const myName = peerMapRef.current.get(userIdRef.current)?.name || "";
-        return Boolean(myName && m.payload.toLowerCase().includes(myName.toLowerCase()));
-      }
-      return true;
+      if (!isPageHiddenRef.current) return false;
+      if (m.event !== EVENT_TEXT) return false;
+      const myName = peerMapRef.current.get(userIdRef.current)?.name || "";
+      return Boolean(myName && m.payload.toLowerCase().includes(myName.toLowerCase()));
     },
-    [notifPref]
+    []
   );
 
   const handleWebSocketMessage = useCallback(
@@ -424,7 +412,6 @@ export default function ChatPage() {
 
       if ((m.event === EVENT_TEXT || m.event === EVENT_FILE) && m.user_id !== uid) {
         if (shouldNotifyIncomingMessage(m)) {
-          sendBrowserNotification(notifPref === "mentions" ? "You were mentioned" : "You got a new message");
         }
       }
 
@@ -457,7 +444,7 @@ export default function ChatPage() {
         }
       }, 50);
     },
-    [processMessage, updateOnlineUsers, markMessagesAsSeen, mergeMessages, cacheChannelMessages, notifPref, shouldNotifyIncomingMessage]
+    [processMessage, updateOnlineUsers, markMessagesAsSeen, mergeMessages, cacheChannelMessages, shouldNotifyIncomingMessage]
   );
 
   const ws = useWebSocket({
@@ -513,10 +500,6 @@ export default function ChatPage() {
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, [markMessagesAsSeen]);
-
-  useEffect(() => {
-    setNotificationPermission(getBrowserNotificationPermission());
-  }, []);
 
   useEffect(() => {
     const handleBeforeUnload = () => {
@@ -825,10 +808,6 @@ export default function ChatPage() {
           const roleResult = await fetchMyRole(userIdRef.current);
           setMyRole(roleResult.role);
         } catch {}
-        try {
-          const notifResult = await fetchNotificationPrefs(userIdRef.current);
-          setNotifPref(notifResult.pref);
-        } catch {}
         setTimeout(() => {
           if (chatContainerRef.current) {
             chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
@@ -975,21 +954,6 @@ export default function ChatPage() {
     } catch {}
   }, []);
 
-  const handleNotificationPreferenceSelect = useCallback(async (value: string) => {
-    setNotifPref(value);
-    if (value !== "mute") {
-      const permission = await requestBrowserNotificationPermission();
-      setNotificationPermission(permission);
-    } else {
-      setNotificationPermission(getBrowserNotificationPermission());
-    }
-
-    try {
-      await setNotificationPrefs(userIdRef.current, value);
-    } catch {}
-    setShowNotifSettings(false);
-  }, []);
-
   const handleAvatarUpload = useCallback(async (file: File) => {
     setProfileError("");
     if (!file.type.startsWith("image/")) {
@@ -1084,7 +1048,6 @@ export default function ChatPage() {
               whileTap={{ scale: 0.97 }}
               onClick={() => {
                 setShowProfileSettings(true);
-                setShowNotifSettings(false);
               }}
               className="flex items-center gap-3 bg-transparent border-none p-0 cursor-pointer text-left"
             >
@@ -1123,20 +1086,6 @@ export default function ChatPage() {
 
           <div className="flex items-center gap-1 sm:gap-2">
             <RealtimePanel userId={userId} accessToken={accessToken} />
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => { setShowNotifSettings(!showNotifSettings); }}
-              className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl glass hover:bg-white/10 transition-all cursor-pointer text-sm"
-            >
-              {notifPref === "mute" ? (
-                <BellOff className="w-3.5 h-3.5 text-red-400" />
-              ) : notifPref === "mentions" ? (
-                <AtSign className="w-3.5 h-3.5 text-amber-400" />
-              ) : (
-                <Bell className="w-3.5 h-3.5 text-emerald-400" />
-              )}
-            </motion.button>
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -1553,45 +1502,9 @@ export default function ChatPage() {
           </div>
         )}
 
-        {showNotifSettings && (
-          <div className="absolute top-12 sm:top-14 right-2 sm:right-4 z-50 glass-strong rounded-xl border border-white/10 p-4 shadow-xl shadow-black/30 w-56">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-text-primary">Notifications</h3>
-              <button onClick={() => setShowNotifSettings(false)} className="text-text-muted hover:text-text-primary cursor-pointer bg-transparent border-none p-0">
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <div className="mb-3 px-3 py-2 rounded-lg bg-white/5">
-              <span className="text-[11px] text-text-muted">
-                {getNotificationPermissionLabel(notificationPermission)}
-              </span>
-            </div>
-            {[
-              { value: "all", label: "All messages", icon: Bell, color: "text-emerald-400" },
-              { value: "mentions", label: "Mentions only", icon: AtSign, color: "text-amber-400" },
-              { value: "mute", label: "Muted", icon: BellOff, color: "text-red-400" },
-            ].map(({ value, label, icon: Icon, color }) => (
-              <button
-                key={value}
-                onClick={() => handleNotificationPreferenceSelect(value)}
-                className={`flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer border-none text-left ${
-                  notifPref === value ? "bg-white/10" : "bg-transparent hover:bg-white/5"
-                }`}
-              >
-                <Icon className={`w-4 h-4 ${color}`} />
-                <span className="text-text-primary">{label}</span>
-              </button>
-            ))}
-          </div>
-        )}
       </motion.section>
     </div>
   );
-}
-
-function getBrowserNotificationPermission(): NotificationPermission | "unsupported" {
-  if (typeof Notification === "undefined") return "unsupported";
-  return Notification.permission;
 }
 
 function resizeAvatarFile(file: File): Promise<string> {
@@ -1622,30 +1535,4 @@ function resizeAvatarFile(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
-}
-
-async function requestBrowserNotificationPermission(): Promise<NotificationPermission | "unsupported"> {
-  if (typeof Notification === "undefined") return "unsupported";
-  if (Notification.permission === "default") {
-    return Notification.requestPermission();
-  }
-  return Notification.permission;
-}
-
-function getNotificationPermissionLabel(permission: NotificationPermission | "unsupported"): string {
-  switch (permission) {
-    case "granted":
-      return "Browser notifications allowed";
-    case "denied":
-      return "Browser notifications blocked";
-    case "unsupported":
-      return "Browser notifications unsupported";
-    default:
-      return "Browser notifications not allowed yet";
-  }
-}
-
-function sendBrowserNotification(msg: string) {
-  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
-  new Notification("NexusChat", { body: msg });
 }

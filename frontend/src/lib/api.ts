@@ -126,95 +126,96 @@ export async function fetchMediaMessages(type = "all", limit = 50): Promise<Chan
   return res.json();
 }
 
-export async function fetchNotificationPrefs(uid: string): Promise<{ pref: string }> {
-  const res = await fetch(`/api/notifications/preferences?uid=${uid}`, {
-    method: "GET",
-    headers: authHeaders(),
-  });
-  if (res.status !== 200) throw new Error(res.statusText);
-  return res.json();
-}
-
-export async function setNotificationPrefs(uid: string, pref: string): Promise<void> {
-  const res = await fetch(`/api/notifications/preferences?uid=${uid}&pref=${pref}`, {
-    method: "PUT",
-    headers: authHeaders(),
-  });
-  if (res.status !== 200) throw new Error(res.statusText);
-}
-
-export interface RealtimeNotification {
+export interface SafetyReport {
   id: string;
-  user_id: string;
-  channel_id?: string;
-  type: string;
-  title: string;
-  body: string;
-  data?: Record<string, unknown>;
-  read: boolean;
+  target_user_id: string;
+  message_id?: string;
+  reason: string;
+  details?: string;
+  status: string;
   created_at: string;
 }
 
-export async function fetchNotifications(limit = 30, userId?: string): Promise<RealtimeNotification[]> {
-  const res = await fetch(`/api/notifications?limit=${limit}`, { headers: authHeaders(userId) });
-  if (!res.ok) throw new Error(res.statusText);
-  const data = await res.json();
-  return data.notifications || [];
-}
-
-export async function fetchNotificationUnreadCount(userId?: string): Promise<number> {
-  const res = await fetch("/api/notifications/unread-count", { headers: authHeaders(userId) });
-  if (!res.ok) throw new Error(res.statusText);
-  const data = await res.json();
-  return Number(data.count || 0);
-}
-
-export async function markNotificationRead(id: string, userId?: string): Promise<void> {
-  const res = await fetch(`/api/notifications/${encodeURIComponent(id)}/read`, {
-    method: "PUT",
-    headers: authHeaders(userId),
-  });
-  if (!res.ok) throw new Error(res.statusText);
-}
-
-export async function markAllNotificationsRead(userId?: string): Promise<void> {
-  const res = await fetch("/api/notifications/read-all", {
-    method: "PUT",
-    headers: authHeaders(userId),
-  });
-  if (!res.ok) throw new Error(res.statusText);
-}
-
-export async function fetchPushPublicKey(): Promise<string> {
-  const res = await fetch("/api/notifications/push-public-key");
-  if (!res.ok) throw new Error(res.statusText);
-  const data = await res.json();
-  return data.public_key || "";
-}
-
-export async function savePushSubscription(subscription: PushSubscription, userId?: string): Promise<void> {
-  const res = await fetch("/api/notifications/push-subscriptions", {
+export async function createSafetyReport(input: { target_user_id: string; message_id?: string; reason: string; details?: string }): Promise<SafetyReport> {
+  const res = await fetch("/api/safety/reports", {
     method: "POST",
-    headers: { ...authHeaders(userId), "Content-Type": "application/json" },
-    body: JSON.stringify(subscription),
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(input),
   });
   if (!res.ok) throw new Error(res.statusText);
-}
-
-export async function createCall(calleeId: string, media: "audio" | "video" = "video", userId?: string) {
-  const res = await fetch("/api/calls", {
-    method: "POST",
-    headers: { ...authHeaders(userId), "Content-Type": "application/json" },
-    body: JSON.stringify({ callee_id: calleeId, media }),
-  });
-  if (!res.ok) throw new Error((await res.json().catch(() => null))?.message || res.statusText);
   return res.json();
 }
 
-export async function fetchIceConfig(userId?: string) {
-  const res = await fetch("/api/calls/ice-config", { headers: authHeaders(userId) });
+export async function fetchSafetyBlocks(): Promise<{ user_id: string; created_at: string }[]> {
+  const res = await fetch("/api/safety/blocks", { headers: authHeaders() });
+  if (!res.ok) throw new Error(res.statusText);
+  return (await res.json()).blocks || [];
+}
+
+export async function blockSafetyUser(userId: string): Promise<void> {
+  const res = await fetch("/api/safety/blocks", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId }),
+  });
+  if (!res.ok) throw new Error(res.statusText);
+}
+
+export async function updateDiscoveryProfile(input: Record<string, unknown>): Promise<void> {
+  const res = await fetch("/api/discovery/profile", {
+    method: "PUT",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(res.statusText);
+}
+
+export async function fetchDiscoveryProfile(): Promise<Record<string, unknown>> {
+  const res = await fetch("/api/discovery/profile", { headers: authHeaders() });
   if (!res.ok) throw new Error(res.statusText);
   return res.json();
+}
+
+export interface WorkspaceItem {
+  id: string;
+  kind: "task" | "note" | "bookmark";
+  title: string;
+  content?: string;
+  status: "todo" | "in_progress" | "done" | "archived";
+  priority?: string;
+  message_id?: string;
+  channel_id?: string;
+}
+
+export async function fetchWorkspaceItems(): Promise<WorkspaceItem[]> {
+  const res = await fetch("/api/workspace/items", { headers: authHeaders() });
+  if (!res.ok) throw new Error(res.statusText);
+  return (await res.json()).items || [];
+}
+
+export async function createWorkspaceItem(input: Partial<WorkspaceItem>): Promise<WorkspaceItem> {
+  const res = await fetch("/api/workspace/items", {
+    method: "POST",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
+}
+
+export async function updateWorkspaceStatus(id: string, status: WorkspaceItem["status"]): Promise<WorkspaceItem> {
+  const res = await fetch(`/api/workspace/items/${encodeURIComponent(id)}/status`, {
+    method: "PUT",
+    headers: { ...authHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
+}
+
+export async function deleteWorkspaceItem(id: string): Promise<void> {
+  const res = await fetch(`/api/workspace/items/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders() });
+  if (!res.ok) throw new Error(res.statusText);
 }
 
 export interface AIRewriteResult {

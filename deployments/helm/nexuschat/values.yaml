@@ -3,7 +3,7 @@ global:
   imagePullSecrets: []
   environment: staging
   domain: nexuschat.click
-  tlsSecretName: nexuschat-click-tls
+  tlsSecretName: ""
   deploymentStrategy:
     type: RollingUpdate
     rollingUpdate:
@@ -37,7 +37,8 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-body-size: "64m"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
 
 traefik:
   apiVersion: traefik.io/v1alpha1
@@ -49,6 +50,11 @@ serviceMonitor:
 
 networkPolicy:
   enabled: true
+
+migration:
+  enabled: true
+  cassandraHost: cassandra.cassandra.svc.cluster.local
+  cassandraPort: "9042"
 
 consul:
   serviceDefaults:
@@ -96,6 +102,7 @@ services:
       CHAT_GRPC_SERVER_PORT: "4000"
       CHAT_GRPC_CLIENT_USER_ENDPOINT: user:4000
       CHAT_GRPC_CLIENT_FORWARDER_ENDPOINT: forwarder:4000
+      CHAT_GRPC_CLIENT_SAFETY_ENDPOINT: safety:4003
       CHAT_MESSAGE_MAXNUM: "5000"
       CHAT_MESSAGE_PAGINATIONNUM: "5000"
       CHAT_MESSAGE_MAXSIZEBYTE: "4096"
@@ -130,6 +137,8 @@ services:
       MATCH_HTTP_SERVER_SWAG: "false"
       MATCH_GRPC_CLIENT_CHAT_ENDPOINT: chat:4000
       MATCH_GRPC_CLIENT_USER_ENDPOINT: user:4000
+      MATCH_GRPC_CLIENT_SAFETY_ENDPOINT: safety:4003
+      MATCH_GRPC_CLIENT_DISCOVERY_ENDPOINT: discovery:4004
     resources:
       requests:
         cpu: 100m
@@ -270,22 +279,25 @@ services:
       maxReplicas: 6
       targetCPUUtilizationPercentage: 70
 
-  presence:
+  safety:
     enabled: true
     image:
-      repository: nexuschat-presence
-    command: ["presence"]
+      repository: nexuschat-safety
+    command: ["safety"]
     replicas: 2
     containerPort: 5005
     grpcPort: 4003
     metricsPort: 8080
-    path: /api/presence
+    path: /api/safety
     env:
-      PRESENCE_HTTP_SERVER_PORT: "5005"
-      PRESENCE_GRPC_SERVER_PORT: "4003"
-      PRESENCE_HEARTBEATSECOND: "15"
-      PRESENCE_TTLSECOND: "45"
-      CHAT_JWT_EXPIRATIONSECOND: "86400"
+      SAFETY_HTTP_SERVER_PORT: "5005"
+      SAFETY_GRPC_SERVER_PORT: "4003"
+      SAFETY_WARN_SCORE: "40"
+      SAFETY_BLOCK_SCORE: "70"
+      SAFETY_RATE_LIMIT_WINDOWSECOND: "10"
+      SAFETY_RATE_LIMIT_MAXMESSAGES: "12"
+      SAFETY_RATE_LIMIT_MUTESECOND: "30"
+      SAFETY_WORKERS: "4"
     resources:
       requests:
         cpu: 50m
@@ -299,23 +311,23 @@ services:
       maxReplicas: 8
       targetCPUUtilizationPercentage: 70
 
-  notification:
+  discovery:
     enabled: true
     image:
-      repository: nexuschat-notification
-    command: ["notification"]
+      repository: nexuschat-discovery
+    command: ["discovery"]
     replicas: 2
     containerPort: 5006
     grpcPort: 4004
     metricsPort: 8080
-    path: /api/notifications
+    path: /api/discovery
     env:
-      NOTIFICATION_HTTP_SERVER_PORT: "5006"
-      NOTIFICATION_GRPC_SERVER_PORT: "4004"
-      NOTIFICATION_GRPC_CLIENT_PRESENCE_ENDPOINT: "presence:4003"
-      NOTIFICATION_RETENTIONDAY: "90"
-      NOTIFICATION_VAPID_SUBJECT: "mailto:admin@nexuschat.click"
-      CHAT_JWT_EXPIRATIONSECOND: "86400"
+      DISCOVERY_HTTP_SERVER_PORT: "5006"
+      DISCOVERY_GRPC_SERVER_PORT: "4004"
+      DISCOVERY_GRPC_CLIENT_SAFETY_ENDPOINT: "safety:4003"
+      DISCOVERY_CANDIDATELIMIT: "20"
+      DISCOVERY_RECENTPEERDAY: "7"
+      DISCOVERY_WORKERS: "4"
     resources:
       requests:
         cpu: 100m
@@ -329,28 +341,22 @@ services:
       maxReplicas: 8
       targetCPUUtilizationPercentage: 70
 
-  call:
+  workspace:
     enabled: true
     image:
-      repository: nexuschat-call
-    command: ["call"]
+      repository: nexuschat-workspace
+    command: ["workspace"]
     replicas: 2
     containerPort: 5007
     grpcPort: 4005
     metricsPort: 8080
-    path: /api/calls
+    path: /api/workspace
     env:
-      CALL_HTTP_SERVER_PORT: "5007"
-      CALL_GRPC_SERVER_PORT: "4005"
-      CALL_GRPC_CLIENT_PRESENCE_ENDPOINT: "presence:4003"
-      CALL_GRPC_CLIENT_CHAT_ENDPOINT: "chat:4000"
-      CALL_RINGTIMEOUTSECOND: "30"
-      CALL_RECONNECTGRACESECOND: "15"
-      CALL_ACTIVETTLSECOND: "7200"
-      CALL_RETENTIONDAY: "30"
-      CALL_TURN_URLS: "stun:stun.l.google.com:19302,turn:turn.nexuschat.click:3478"
-      CALL_TURN_TTLSECOND: "3600"
-      CHAT_JWT_EXPIRATIONSECOND: "86400"
+      WORKSPACE_HTTP_SERVER_PORT: "5007"
+      WORKSPACE_GRPC_SERVER_PORT: "4005"
+      WORKSPACE_GRPC_CLIENT_CHAT_ENDPOINT: "chat:4000"
+      WORKSPACE_WORKERS: "4"
+      WORKSPACE_REMINDERPOLLSECOND: "15"
     resources:
       requests:
         cpu: 100m
@@ -366,7 +372,3 @@ services:
 
 turn:
   enabled: false
-  image: coturn/coturn:4.6.2
-  realm: nexuschat.click
-  minPort: 49160
-  maxPort: 49200

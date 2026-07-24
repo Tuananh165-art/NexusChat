@@ -3,6 +3,10 @@ package match
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
+
+	"github.com/Tuananh165-art/NexusChat/pkg/realtime"
 )
 
 type UserService interface {
@@ -62,6 +66,28 @@ func (svc *MatchingServiceImpl) Match(ctx context.Context, userID uint64) (*Matc
 		return nil, fmt.Errorf("error match user %d: %w", userID, err)
 	}
 	if matched {
+		if endpoint := os.Getenv("MATCH_GRPC_CLIENT_SAFETY_ENDPOINT"); endpoint != "" {
+			filtered, filterErr := realtime.CallStructRPC(ctx, endpoint, "nexuschat.safety.v1.SafetyService", "BatchFilterCandidates", map[string]any{
+				"user_id": strconv.FormatUint(userID, 10), "candidate_ids": strconv.FormatUint(peerID, 10),
+			})
+			if filterErr == nil && filtered != nil {
+				values := filtered.GetFields()["candidate_ids"]
+				if values != nil && len(values.GetListValue().GetValues()) == 0 {
+					return &MatchResult{Matched: false}, nil
+				}
+			}
+		}
+		if endpoint := os.Getenv("MATCH_GRPC_CLIENT_DISCOVERY_ENDPOINT"); endpoint != "" {
+			ranked, rankErr := realtime.CallStructRPC(ctx, endpoint, "nexuschat.discovery.v1.DiscoveryService", "RankCandidates", map[string]any{
+				"user_id": strconv.FormatUint(userID, 10), "candidate_ids": strconv.FormatUint(peerID, 10),
+			})
+			if rankErr == nil && ranked != nil {
+				values := ranked.GetFields()["candidates"]
+				if values != nil && len(values.GetListValue().GetValues()) == 0 {
+					return &MatchResult{Matched: false}, nil
+				}
+			}
+		}
 		newChannelID, accessToken, err := svc.chanRepo.CreateChannel(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("error create channel: %w", err)

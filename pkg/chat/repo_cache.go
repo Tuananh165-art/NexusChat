@@ -9,9 +9,8 @@ import (
 )
 
 var (
-	channelUsersPrefix    = "rc:chanusers"
-	onlineUsersPrefix     = "rc:onlineusers"
-	notifPrefsPrefix      = "rc:notifprefs"
+	channelUsersPrefix = "rc:chanusers"
+	onlineUsersPrefix  = "rc:onlineusers"
 )
 
 type UserRepoCache interface {
@@ -22,8 +21,6 @@ type UserRepoCache interface {
 	AddOnlineUser(ctx context.Context, channelID uint64, userID uint64) error
 	DeleteOnlineUser(ctx context.Context, channelID, userID uint64) error
 	GetOnlineUserIDs(ctx context.Context, channelID uint64) ([]uint64, error)
-	SetNotificationPref(ctx context.Context, channelID, userID uint64, pref string) error
-	GetNotificationPref(ctx context.Context, channelID, userID uint64) (string, error)
 }
 
 type MessageRepoCache interface {
@@ -156,22 +153,6 @@ func (cache *UserRepoCacheImpl) GetOnlineUserIDs(ctx context.Context, channelID 
 		userIDs = append(userIDs, userID)
 	}
 	return userIDs, nil
-}
-func (cache *UserRepoCacheImpl) SetNotificationPref(ctx context.Context, channelID, userID uint64, pref string) error {
-	key := constructKey(notifPrefsPrefix, channelID) + ":" + strconv.FormatUint(userID, 10)
-	return cache.r.Set(ctx, key, pref)
-}
-func (cache *UserRepoCacheImpl) GetNotificationPref(ctx context.Context, channelID, userID uint64) (string, error) {
-	key := constructKey(notifPrefsPrefix, channelID) + ":" + strconv.FormatUint(userID, 10)
-	var pref string
-	found, err := cache.r.Get(ctx, key, &pref)
-	if err != nil {
-		return "", err
-	}
-	if !found {
-		return "all", nil
-	}
-	return pref, nil
 }
 
 type MessageRepoCacheImpl struct {

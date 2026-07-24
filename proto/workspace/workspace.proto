@@ -1,0 +1,12 @@
+syntax = "proto3";
+package nexuschat.workspace.v1;
+
+import "google/protobuf/struct.proto";
+
+service WorkspaceService {
+  rpc GetWorkspaceItem(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc BatchGetWorkspaceItems(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc CreateItemFromMessage(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc AuthorizeWorkspaceItem(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc ArchiveChannelWorkspace(google.protobuf.Struct) returns (google.protobuf.Struct);
+}

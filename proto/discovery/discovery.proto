@@ -1,0 +1,12 @@
+syntax = "proto3";
+package nexuschat.discovery.v1;
+
+import "google/protobuf/struct.proto";
+
+service DiscoveryService {
+  rpc GetDiscoveryProfile(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc RankCandidates(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc RecordMatch(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc RecordConversationEnded(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc GetRecentPeers(google.protobuf.Struct) returns (google.protobuf.Struct);
+}

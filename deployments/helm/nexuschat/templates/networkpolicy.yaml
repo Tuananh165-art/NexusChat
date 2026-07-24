@@ -57,9 +57,5 @@ spec:
         - protocol: TCP
           port: 5432
         - protocol: TCP
-          port: 3478
-        - protocol: UDP
-          port: 3478
-        - protocol: TCP
           port: 4318
 {{- end }}

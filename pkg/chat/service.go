@@ -3,11 +3,14 @@ package chat
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Tuananh165-art/NexusChat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/realtime"
 )
 
 const (
@@ -45,8 +48,6 @@ type UserService interface {
 	AddOnlineUser(ctx context.Context, channelID, userID uint64) error
 	DeleteOnlineUser(ctx context.Context, channelID, userID uint64) error
 	GetOnlineUserIDs(ctx context.Context, channelID uint64) ([]uint64, error)
-	SetNotificationPref(ctx context.Context, channelID, userID uint64, pref string) error
-	GetNotificationPref(ctx context.Context, channelID, userID uint64) (string, error)
 }
 
 type ChannelService interface {
@@ -76,6 +77,27 @@ func (svc *MessageServiceImpl) BroadcastTextMessage(ctx context.Context, channel
 		return fmt.Errorf("error create text message: %w", err)
 	}
 	msg.ParentID = parentID
+	if endpoint := os.Getenv("CHAT_GRPC_CLIENT_SAFETY_ENDPOINT"); endpoint != "" {
+		decision, moderationErr := realtime.CallStructRPC(ctx, endpoint, "nexuschat.safety.v1.SafetyService", "ModerateMessage", map[string]any{
+			"channel_id": strconv.FormatUint(channelID, 10),
+			"message_id": strconv.FormatUint(msg.MessageID, 10),
+			"user_id":    strconv.FormatUint(userID, 10),
+			"content":    payload,
+		})
+		if moderationErr != nil {
+			// Degraded mode: keep chat available; Safety consumes the chat event
+			// and can apply an asynchronous decision later.
+			slog.Warn("safety moderation unavailable", "error", moderationErr)
+		} else if decision != nil {
+			action := decision.GetFields()["action"].GetStringValue()
+			if action == "block" {
+				return fmt.Errorf("message blocked by safety policy: %s", decision.GetFields()["reason"].GetStringValue())
+			}
+			if action == "warn" {
+				msg.Payload = "[Nội dung đã được cảnh báo bởi Safety] " + payload
+			}
+		}
+	}
 	if parentID > 0 {
 		parent, err := svc.msgRepo.GetMessage(ctx, channelID, parentID)
 		if err == nil && parent != nil {
@@ -346,12 +368,6 @@ func (svc *UserServiceImpl) GetOnlineUserIDs(ctx context.Context, channelID uint
 		return nil, fmt.Errorf("error get online users in channel %d: %w", channelID, err)
 	}
 	return users, nil
-}
-func (svc *UserServiceImpl) SetNotificationPref(ctx context.Context, channelID, userID uint64, pref string) error {
-	return svc.userRepo.SetNotificationPref(ctx, channelID, userID, pref)
-}
-func (svc *UserServiceImpl) GetNotificationPref(ctx context.Context, channelID, userID uint64) (string, error) {
-	return svc.userRepo.GetNotificationPref(ctx, channelID, userID)
 }
 
 type ChannelServiceImpl struct {

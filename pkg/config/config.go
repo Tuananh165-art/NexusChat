@@ -14,9 +14,9 @@ type Config struct {
 	Match         *MatchConfig         `mapstructure:"match"`
 	Uploader      *UploaderConfig      `mapstructure:"uploader"`
 	User          *UserConfig          `mapstructure:"user"`
-	Presence      *PresenceConfig      `mapstructure:"presence"`
-	Notification  *NotificationConfig  `mapstructure:"notification"`
-	Call          *CallConfig          `mapstructure:"call"`
+	Safety        *SafetyConfig        `mapstructure:"safety"`
+	Discovery     *DiscoveryConfig     `mapstructure:"discovery"`
+	Workspace     *WorkspaceConfig     `mapstructure:"workspace"`
 	Kafka         *KafkaConfig         `mapstructure:"kafka"`
 	Cassandra     *CassandraConfig     `mapstructure:"cassandra"`
 	Redis         *RedisConfig         `mapstructure:"redis"`
@@ -95,6 +95,12 @@ type MatchConfig struct {
 			User struct {
 				Endpoint string
 			}
+			Safety struct {
+				Endpoint string
+			}
+			Discovery struct {
+				Endpoint string
+			}
 		}
 	}
 }
@@ -159,7 +165,7 @@ type UserConfig struct {
 	}
 }
 
-type RealtimeServiceConfig struct {
+type PlatformServiceConfig struct {
 	Http struct {
 		Server struct {
 			Port string
@@ -170,7 +176,10 @@ type RealtimeServiceConfig struct {
 			Port string
 		}
 		Client struct {
-			Presence struct {
+			Safety struct {
+				Endpoint string
+			}
+			Discovery struct {
 				Endpoint string
 			}
 			Chat struct {
@@ -180,35 +189,29 @@ type RealtimeServiceConfig struct {
 	}
 }
 
-type PresenceConfig struct {
-	RealtimeServiceConfig `mapstructure:",squash"`
-	HeartbeatSecond       int64
-	TTLSecond             int64
+type SafetyConfig struct {
+	PlatformServiceConfig `mapstructure:",squash"`
+	WarnScore             int
+	BlockScore            int
+	RateLimit             struct {
+		WindowSecond int64
+		MaxMessages  int64
+		MuteSecond   int64
+	}
+	Workers int
 }
 
-type NotificationConfig struct {
-	RealtimeServiceConfig `mapstructure:",squash"`
-	RetentionDay          int
-	VAPID                 struct {
-		PublicKey  string
-		PrivateKey string
-		Subject    string
-	}
+type DiscoveryConfig struct {
+	PlatformServiceConfig `mapstructure:",squash"`
+	CandidateLimit        int
+	RecentPeerDay         int
+	Workers               int
 }
 
-type CallConfig struct {
-	RealtimeServiceConfig `mapstructure:",squash"`
-	RingTimeoutSecond     int64
-	ReconnectGraceSecond  int64
-	ActiveTTLSecond       int64
-	RetentionDay          int
-	TURN                  struct {
-		URLs         string
-		Username     string
-		Credential   string
-		SharedSecret string
-		TTLSecond    int64
-	}
+type WorkspaceConfig struct {
+	PlatformServiceConfig `mapstructure:",squash"`
+	Workers               int
+	ReminderPollSecond    int64
 }
 
 type KafkaConfig struct {
@@ -267,6 +270,8 @@ func setDefault() {
 	viper.SetDefault("match.http.server.swag", false)
 	viper.SetDefault("match.grpc.client.chat.endpoint", "localhost:4000")
 	viper.SetDefault("match.grpc.client.user.endpoint", "localhost:4001")
+	viper.SetDefault("match.grpc.client.safety.endpoint", "localhost:4003")
+	viper.SetDefault("match.grpc.client.discovery.endpoint", "localhost:4004")
 
 	viper.SetDefault("uploader.http.server.port", "5003")
 	viper.SetDefault("uploader.http.server.swag", false)
@@ -298,32 +303,27 @@ func setDefault() {
 
 	viper.SetDefault("forwarder.grpc.server.port", "4002")
 
-	viper.SetDefault("presence.http.server.port", "5005")
-	viper.SetDefault("presence.grpc.server.port", "4003")
-	viper.SetDefault("presence.heartbeatSecond", 15)
-	viper.SetDefault("presence.ttlSecond", 45)
+	viper.SetDefault("safety.http.server.port", "5005")
+	viper.SetDefault("safety.grpc.server.port", "4003")
+	viper.SetDefault("safety.warnScore", 40)
+	viper.SetDefault("safety.blockScore", 70)
+	viper.SetDefault("safety.rateLimit.windowSecond", 10)
+	viper.SetDefault("safety.rateLimit.maxMessages", 12)
+	viper.SetDefault("safety.rateLimit.muteSecond", 30)
+	viper.SetDefault("safety.workers", 4)
 
-	viper.SetDefault("notification.http.server.port", "5006")
-	viper.SetDefault("notification.grpc.server.port", "4004")
-	viper.SetDefault("notification.grpc.client.presence.endpoint", "localhost:4003")
-	viper.SetDefault("notification.retentionDay", 90)
-	viper.SetDefault("notification.vapid.publicKey", "")
-	viper.SetDefault("notification.vapid.privateKey", "")
-	viper.SetDefault("notification.vapid.subject", "mailto:admin@nexuschat.click")
+	viper.SetDefault("discovery.http.server.port", "5006")
+	viper.SetDefault("discovery.grpc.server.port", "4004")
+	viper.SetDefault("discovery.grpc.client.safety.endpoint", "localhost:4003")
+	viper.SetDefault("discovery.candidateLimit", 20)
+	viper.SetDefault("discovery.recentPeerDay", 7)
+	viper.SetDefault("discovery.workers", 4)
 
-	viper.SetDefault("call.http.server.port", "5007")
-	viper.SetDefault("call.grpc.server.port", "4005")
-	viper.SetDefault("call.grpc.client.presence.endpoint", "localhost:4003")
-	viper.SetDefault("call.grpc.client.chat.endpoint", "localhost:4000")
-	viper.SetDefault("call.ringTimeoutSecond", 30)
-	viper.SetDefault("call.reconnectGraceSecond", 15)
-	viper.SetDefault("call.activeTTLSecond", 7200)
-	viper.SetDefault("call.retentionDay", 30)
-	viper.SetDefault("call.turn.urls", "stun:stun.l.google.com:19302,turn:localhost:3478")
-	viper.SetDefault("call.turn.username", "")
-	viper.SetDefault("call.turn.credential", "")
-	viper.SetDefault("call.turn.sharedSecret", "")
-	viper.SetDefault("call.turn.ttlSecond", 3600)
+	viper.SetDefault("workspace.http.server.port", "5007")
+	viper.SetDefault("workspace.grpc.server.port", "4005")
+	viper.SetDefault("workspace.grpc.client.chat.endpoint", "localhost:4000")
+	viper.SetDefault("workspace.workers", 4)
+	viper.SetDefault("workspace.reminderPollSecond", 15)
 
 	viper.SetDefault("kafka.addrs", "localhost:9092")
 	viper.SetDefault("kafka.version", "1.0.0")

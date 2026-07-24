@@ -14,3 +14,4 @@ frontend/out/
 frontend/.next/
 frontend/node_modules/
 frontend/*.tsbuildinfo
+.tmp-go-cache/

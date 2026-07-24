@@ -61,3 +61,22 @@ func IdentityFrom(c *gin.Context) Identity {
 	identity, _ := value.(Identity)
 	return identity
 }
+
+// RequireUserID is used by pre-match APIs where a channel token does not exist
+// yet. The user service remains the source of truth; this header mirrors the
+// current frontend/user bootstrap contract.
+func RequireUserID() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw := c.GetHeader("X-User-Id")
+		if raw == "" {
+			raw = c.Query("uid")
+		}
+		userID, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || userID == 0 {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"message": "unauthorized"})
+			return
+		}
+		c.Set("identity", Identity{UserID: userID})
+		c.Next()
+	}
+}

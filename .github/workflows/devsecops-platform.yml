@@ -43,7 +43,7 @@ jobs:
         run: make test
 
       - name: Realtime race tests
-        run: go test -race ./pkg/realtime ./pkg/presence ./pkg/notification ./pkg/call ./pkg/chat
+        run: go test -race ./pkg/realtime ./pkg/safety ./pkg/discovery ./pkg/workspace ./pkg/chat ./pkg/match
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -206,18 +206,18 @@ jobs:
           - name: ai-service
             dockerfile: ai-service/Dockerfile
             context: ai-service
-          - name: presence
+          - name: safety
             dockerfile: build/Dockerfile.realtime
             context: .
-            service: presence
-          - name: notification
+            service: safety
+          - name: discovery
             dockerfile: build/Dockerfile.realtime
             context: .
-            service: notification
-          - name: call
+            service: discovery
+          - name: workspace
             dockerfile: build/Dockerfile.realtime
             context: .
-            service: call
+            service: workspace
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -240,14 +240,14 @@ jobs:
             ai-service)
               repo="nexuschat-ai-service"
               ;;
-            presence)
-              repo="nexuschat-presence"
+            safety)
+              repo="nexuschat-safety"
               ;;
-            notification)
-              repo="nexuschat-notification"
+            discovery)
+              repo="nexuschat-discovery"
               ;;
-            call)
-              repo="nexuschat-call"
+            workspace)
+              repo="nexuschat-workspace"
               ;;
             *)
               echo "Unknown image name: ${{ matrix.name }}" >&2
@@ -452,7 +452,7 @@ jobs:
 
       - name: Wait for deployments
         run: |
-          for deploy in web chat match user uploader forwarder ai-service presence notification call; do
+          for deploy in web chat match user uploader forwarder ai-service safety discovery workspace; do
             echo "Waiting for rollout: $deploy"
             kubectl -n "$KUBE_NAMESPACE" rollout status deployment/$deploy --timeout=600s
           done
@@ -463,7 +463,7 @@ jobs:
 
       - name: Realtime service smoke checks
         run: |
-          for target in presence:5005 notification:5006 call:5007; do
+          for target in safety:5005 discovery:5006 workspace:5007; do
             name="${target%%:*}"
             kubectl -n "$KUBE_NAMESPACE" run "smoke-${name}-${GITHUB_RUN_ID}" \
               --image=curlimages/curl:8.12.1 --restart=Never --rm --attach \

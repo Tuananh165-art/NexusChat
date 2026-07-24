@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	ChatEventsTopic         = "nexuschat.chat.events.v1"
-	PresenceEventsTopic     = "nexuschat.presence.events.v1"
-	CallEventsTopic         = "nexuschat.call.events.v1"
-	NotificationEventsTopic = "nexuschat.notification.events.v1"
+	ChatEventsTopic      = "nexuschat.chat.events.v1"
+	SafetyEventsTopic    = "nexuschat.safety.events.v1"
+	DiscoveryEventsTopic = "nexuschat.discovery.events.v1"
+	WorkspaceEventsTopic = "nexuschat.workspace.events.v1"
 )
 
 type Event struct {

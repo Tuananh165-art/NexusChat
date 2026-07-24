@@ -136,12 +136,6 @@ func (r *HttpServer) RegisterRoutes() {
 			roleGroup.GET("", r.GetMyRole)
 			roleGroup.PUT("", r.AssignRole)
 		}
-		notifGroup := chatGroup.Group("/notification")
-		notifGroup.Use(common.JWTAuth())
-		{
-			notifGroup.GET("/prefs", r.GetNotificationPrefs)
-			notifGroup.PUT("/prefs", r.SetNotificationPrefs)
-		}
 		aiGroup := chatGroup.Group("/ai")
 		aiGroup.Use(common.JWTAuth())
 		{

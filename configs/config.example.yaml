@@ -32,16 +32,21 @@ forwarder:
   grpc:
     server:
       port: "4002" 
-presence:
+safety:
   http:
     server:
       port: "5005"
   grpc:
     server:
       port: "4003"
-  heartbeatSecond: 15
-  ttlSecond: 45
-notification:
+  warnScore: 40
+  blockScore: 70
+  rateLimit:
+    windowSecond: 10
+    maxMessages: 12
+    muteSecond: 30
+  workers: 4
+discovery:
   http:
     server:
       port: "5006"
@@ -49,14 +54,12 @@ notification:
     server:
       port: "4004"
     client:
-      presence:
+      safety:
         endpoint: "localhost:4003"
-  retentionDay: 90
-  vapid:
-    publicKey: ""
-    privateKey: ""
-    subject: "mailto:admin@nexuschat.click"
-call:
+  candidateLimit: 20
+  recentPeerDay: 7
+  workers: 4
+workspace:
   http:
     server:
       port: "5007"
@@ -64,18 +67,10 @@ call:
     server:
       port: "4005"
     client:
-      presence:
-        endpoint: "localhost:4003"
       chat:
         endpoint: "localhost:4000"
-  ringTimeoutSecond: 30
-  reconnectGraceSecond: 15
-  activeTTLSecond: 7200
-  retentionDay: 30
-  turn:
-    urls: "stun:stun.l.google.com:19302,turn:localhost:3478"
-    sharedSecret: ""
-    ttlSecond: 3600
+  workers: 4
+  reminderPollSecond: 15
 match:
   http:
     server:
@@ -88,6 +83,10 @@ match:
         endpoint: "localhost:4000"
       user:
         endpoint: "localhost:4001"
+      safety:
+        endpoint: "localhost:4003"
+      discovery:
+        endpoint: "localhost:4004"
 uploader:
   http:
     server:

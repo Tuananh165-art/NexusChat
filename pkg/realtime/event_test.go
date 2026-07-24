@@ -6,18 +6,18 @@ import (
 )
 
 func TestEventEnvelope(t *testing.T) {
-	event, err := NewEvent("call.ringing", "call-service", "call-1", map[string]string{"call_id": "call-1"})
+	event, err := NewEvent("safety.report.created", "safety-service", "report-1", map[string]string{"report_id": "report-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if event.EventID == "" || event.SchemaVersion != 1 || event.EventType != "call.ringing" {
+	if event.EventID == "" || event.SchemaVersion != 1 || event.EventType != "safety.report.created" {
 		t.Fatalf("invalid event: %+v", event)
 	}
 	var payload map[string]string
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["call_id"] != "call-1" {
+	if payload["report_id"] != "report-1" {
 		t.Fatalf("unexpected payload: %+v", payload)
 	}
 }

@@ -1,0 +1,12 @@
+syntax = "proto3";
+package nexuschat.safety.v1;
+
+import "google/protobuf/struct.proto";
+
+service SafetyService {
+  rpc ModerateMessage(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc IsUserBlocked(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc BatchFilterCandidates(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc GetUserRisk(google.protobuf.Struct) returns (google.protobuf.Struct);
+  rpc AuthorizeModerationAction(google.protobuf.Struct) returns (google.protobuf.Struct);
+}

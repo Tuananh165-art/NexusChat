@@ -1,0 +1,52 @@
+{{- if .Values.migration.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nexuschat.fullname" . }}-cassandra-migration
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+data:
+  002_replace_realtime_services.cql: |
+{{ .Files.Get "migrations/002_replace_realtime_services.cql" | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "nexuschat.fullname" . }}-cassandra-migration
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "nexuschat.name" . }}-migration
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: cassandra-migration
+          image: cassandra:4.0
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              until cqlsh "$CASSANDRA_HOST" "$CASSANDRA_PORT" -e "DESCRIBE KEYSPACES"; do sleep 5; done
+              cqlsh "$CASSANDRA_HOST" "$CASSANDRA_PORT" -f /migrations/002_replace_realtime_services.cql
+          env:
+            - name: CASSANDRA_HOST
+              value: {{ .Values.migration.cassandraHost | quote }}
+            - name: CASSANDRA_PORT
+              value: {{ .Values.migration.cassandraPort | quote }}
+          volumeMounts:
+            - name: migration
+              mountPath: /migrations
+      volumes:
+        - name: migration
+          configMap:
+            name: {{ include "nexuschat.fullname" . }}-cassandra-migration
+{{- end }}
