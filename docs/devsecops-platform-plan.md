@@ -1,41 +1,76 @@
-# DevSecOps platform plan hiện hành
+# Current DevSecOps Platform
 
-## Image matrix
+## CI
 
-Workflow build/push/scan/SBOM/sign:
+Workflow `.github/workflows/devsecops-platform.yml` runs:
 
-- `nexuschat-api`
-- `nexuschat-web`
-- `nexuschat-ai-service`
-- `nexuschat-safety`
-- `nexuschat-discovery`
-- `nexuschat-workspace`
+- Go unit tests and race tests.
+- Frontend `npm ci`, lint, and build.
+- AI service Ruff and pytest.
+- Helm lint/template.
+- Gitleaks secret scanning.
+- Dependency Review on Pull Requests.
+- CodeQL for Go, JavaScript/TypeScript, and Python.
+- Trivy filesystem scanning.
 
-Mỗi image được tag bằng Git SHA hoặc release tag `v*`; không dùng mutable `latest`.
+The workflow triggers on `workflow_dispatch`, `pull_request` to any branch, pushes to `main` or `kafka`, and `v*` tags.
 
-## Quality gates
+## Container security gates
 
-1. Go unit và race test cho chat, match, realtime, Safety, Discovery, Workspace.
-2. Frontend lint/build.
-3. Docker build và Compose config.
-4. Trivy vulnerability scan.
-5. SPDX SBOM.
-6. Cosign signature.
-7. Helm upgrade `--atomic --wait`.
-8. Smoke `/health` và `/ready`.
+All application images and proxy variants:
 
-## Deployment matrix
+1. Build locally on the runner.
+2. Run a Trivy scan with `CRITICAL,HIGH` and `exit-code: 1`.
+3. Generate an SPDX SBOM.
+4. Upload SARIF/SBOM artifacts.
+5. Push only after the gate passes.
+6. Sign the immutable image with Cosign.
 
-Kubernetes chờ mười Deployment:
+Proxy variants:
 
-`web chat match user uploader forwarder ai-service safety discovery workspace`
+- `nexuschat-api:proxy-upload-<sha>`.
+- `nexuschat-web:proxy-upload-<sha>`.
+- `nexuschat-web:proxy-upload-v2-<sha>`.
 
-K3s lab dùng ingress-nginx HTTP-only. `values-lab-k3s.yaml` đặt `tlsSecretName: ""`, tắt SSL redirect và không cài cert-manager/Coturn.
+## CD
 
-## Service contracts
+CD is currently direct Helm, not ArgoCD:
 
-- Chat gọi Safety gRPC trước khi broadcast.
-- Match gọi Safety lọc block/risk và Discovery xếp hạng.
-- Workspace kiểm tra channel membership qua chat authorization.
-- Kafka topics dùng `nexuschat.*.events.v1`, outbox và `processed_events`.
-- Redis giữ bounded waitlist, lock, cache, rate limit, reminder lease và fast dedup.
+- Deploys to the lab only on a push to the `main` branch.
+- The Kubernetes deploy job runs only after a successful push to `main`.
+- The deploy job requires `build-images` and `build-proxy-variants` to pass.
+- Runner: `[self-hosted, linux, x64, k3s-lab]`.
+- App namespace: `nexuschat-lab`.
+- Deploys platform observability with `deployments/platform/observability`.
+- Deploys Kafka UI/RedisInsight with `deployments/platform/dashboards`.
+- Deploys the application with Helm using `values.yaml` followed by `values-lab-k3s.yaml`.
+- Waits for ten Deployments: `web`, `chat`, `match`, `user`, `uploader`, `forwarder`, `ai-service`, `safety`, `discovery`, `workspace`.
+- Performs `/ready` smoke checks for Safety, Discovery, and Workspace.
+
+The workflow does not install Kafka, Redis, Cassandra, MinIO, PostgreSQL, Traefik, kube-prometheus-stack, or Kyverno. Platform dependencies must be prepared in the cluster first.
+
+A `git pull` alone does not deploy. A `git commit` followed by `git push` to `main` can trigger CD.
+
+## Observability
+
+- Prometheus/Grafana: kube-prometheus-stack, with NodePorts `30900` and `30300`, respectively.
+- Jaeger UI: `jaeger-ui` Service, NodePort `30686`.
+- OpenTelemetry Collector: internal Service `otel-collector.monitoring.svc.cluster.local:4317/4318`.
+- Kafka UI: NodePort `30080`.
+- RedisInsight: NodePort `30540`.
+
+NodePorts are for a lab/protected network. Production dashboards require authentication, firewall/VPN controls, and TLS through Traefik.
+
+## Kubernetes security
+
+Kyverno policies are located at `deployments/platform/security/kyverno-policies.yaml`. Install Kyverno before applying the policy. Check `validationFailureAction` and the namespace match before changing from Audit to Enforce.
+
+The app Helm chart enables a non-root security context, drops capabilities, uses a read-only root filesystem, and sets resource limits in the template. The app NetworkPolicy/ServiceMonitor are disabled in the lab profile.
+
+## Remaining limitations
+
+- CD still depends on a self-hosted runner and `KUBE_CONFIG_B64`.
+- Stateful platform services are not provisioned automatically by the workflow.
+- NodePorts are not suitable for public production.
+- The workflow has no production promotion/approval yet.
+- Helm lint/template requires a machine with Helm; cluster rollout requires a working kubeconfig.

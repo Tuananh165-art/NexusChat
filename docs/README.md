@@ -1,26 +1,135 @@
-# NexusChat Engineering Docs
+# NexusChat Documentation
 
-This directory documents the current NexusChat source: Go microservices, a Next.js frontend served by Go `web`, a Python FastAPI `ai-service`, local Docker Compose, the Kubernetes Helm chart, and the GitHub Actions -> Docker Hub -> K3s lab pipeline.
+This document describes the current NexusChat runtime: Go services, the Next.js frontend, the FastAPI `ai-service`, local Docker Compose, the Kubernetes Helm chart, and the GitHub Actions pipeline for direct deployment to the K3s lab.
 
-## Main documents
+## Main documentation
 
-| File | Content |
-| --- | --- |
-| [Architecture](architecture.md) | Runtime architecture, service boundaries, data ownership, API/ingress/dependency flow |
-| [K3s/Kubernetes Deployment Guide](deploy-k8s-guide.md) | 4GB lab runbook, dependencies, Helm deploy, GitHub Actions CD, verification, and rollback |
-| [Docker Hub + Direct K8s Rollout](dockerhub-direct-k8s-rollout.md) | Concise CI/CD guide for Docker Hub + self-hosted runner + Helm |
-| [Hướng dẫn deploy K8s và CI/CD](huong-dan-deploy-k8s-ci-cd-vn.md) | Bản tiếng Việt có dấu, giải thích gộp image, push main, và deploy lại |
-| [Hướng dẫn test 3 chức năng mới](huong-dan-test-3-chuc-nang-moi.md) | Test Safety, Discovery và Workspace bằng UI, API, WebSocket và K8s logs |
-| [Hướng dẫn room chat nhóm](huong-dan-room-chat-nhom.md) | Plan, API, database, frontend và cách test room chat nhiều người |
-| [DevSecOps Platform Plan](devsecops-platform-plan.md) | Environment model, CI/CD, security gates, observability, and release promotion |
-| [DevSecOps Implementation Runbook](devsecops-implementation-runbook.md) | Current implementation/operations checklist with direct lab deployment and optional GitOps references |
-| [AI Service Plan](ai-service-plan.md) | Python AI service design and implementation state |
-| [Clean Code And Design Patterns](clean-code-design-patterns.md) | Go/Next.js/Python AI service coding standards and testing expectations |
-| [AI Service README](../ai-service/README.md) | How to run `ai-service` and its API |
+| File | Contents |
+|---|---|
+| [Architecture](architecture.md) | Service architecture, dependencies, Traefik, data flow, and observability |
+| [Kubernetes/K3s Deployment Guide](deploy-k8s-guide.md) | Installing dependencies, deploying the lab Helm release, NodePort dashboards, verification, and rollback |
+| [Docker Hub Direct K8s Rollout](dockerhub-direct-k8s-rollout.md) | Git SHA image process, security gates, and direct Helm CD |
+| [DevSecOps Platform Plan](devsecops-platform-plan.md) | CI, CD, Trivy, CodeQL, Gitleaks, SBOM, Cosign, and current limitations |
+| [AI Service Plan](ai-service-plan.md) | AI service design and implementation status |
+| [Clean Code And Design Patterns](clean-code-design-patterns.md) | Coding and testing conventions |
+| [AI Service README](../ai-service/README.md) | How to run and configure the AI service |
+
+## Source of truth by environment
+
+### Local Docker Compose
+
+Main commands:
+
+```powershell
+docker compose config
+docker compose up --build -d
+```
+
+Files used directly by Compose:
+
+| File | Role |
+|---|---|
+| `docker-compose.yaml` | Defines the local app, database, broker, cache, storage, Traefik, and observability |
+| `deployments/prometheus/prometheus.yaml` | Static scrape targets for Compose |
+| `deployments/grafana/provisioning/datasources/datasources.yaml` | Prometheus and Jaeger data sources for local Grafana |
+| `deployments/otel-collector/config.yaml` | OTLP receiver and trace export to local Jaeger |
+
+Docker Compose uses host ports, not Kubernetes NodePorts. Local Grafana is `http://localhost:3000`, Prometheus is `http://localhost:9090`, and Jaeger is `http://localhost:16686`.
+
+### Kubernetes/K3s
+
+The main application deployment file is not `values-lab-k3s.yaml` by itself. The Helm chart is assembled in this order:
+
+```text
+deployments/helm/nexuschat/Chart.yaml
++ deployments/helm/nexuschat/values.yaml
++ deployments/helm/nexuschat/values-lab-k3s.yaml
++ deployments/helm/nexuschat/templates/*
+```
+
+`values.yaml` is the base configuration; `values-lab-k3s.yaml` is the override for the 4GB/50GB lab. When both are passed to Helm, the lab file overrides base values. The workflow uses this exact pair of files.
+
+```bash
+helm upgrade --install nexuschat deployments/helm/nexuschat \
+  --namespace nexuschat-lab \
+  --create-namespace \
+  --values deployments/helm/nexuschat/values.yaml \
+  --values deployments/helm/nexuschat/values-lab-k3s.yaml \
+  --set-string imageDefaults.tag="$GIT_SHA" \
+  --wait --timeout 10m
+```
+
+The current lab profile uses Traefik, host `nexuschat.click`, HTTP-only, and `tlsSecretName: ""`. The domain must resolve to the node/Ingress IP; Helm does not create DNS or TLS automatically.
+
+## Kubernetes platform manifests
+
+Platform manifests are not automatically rendered by the application Helm chart. They must be installed separately or applied by the pipeline:
+
+| Path | Used? | Role |
+|---|---|---|
+| `deployments/platform/observability/` | Yes | Jaeger and OpenTelemetry Collector for Kubernetes |
+| `deployments/platform/dashboards/` | Yes | Kafka UI and RedisInsight NodePorts |
+| `deployments/platform/monitoring/kube-prometheus-stack-values.yaml` | When installing kube-prometheus-stack | Grafana NodePort `30300`, Prometheus `30900`, and lightweight lab profile |
+| `deployments/platform/monitoring/ingresses.yaml` | Optional | Traefik Ingress for Grafana, Prometheus, and Jaeger |
+| `deployments/platform/ingresses.yaml` | Optional | Traefik Ingress for Kafka UI, RedisInsight, and MinIO |
+| `deployments/platform/security/kyverno-policies.yaml` | If using Kyverno | Runtime policy; Kyverno must be installed first |
+| `deployments/platform/cassandra/cassandra.yaml` | Optional | Standalone lab Cassandra |
+| `deployments/run.sh` | Local helper | Legacy Docker Compose helper |
+
+ArgoCD, Consul, ECK/ELK, ingress-nginx, and standalone monitoring have been removed from the current configuration. `kube-prometheus-stack` is the only Kubernetes monitoring option; Jaeger/OTel are declared in separate manifests.
+
+When installing kube-prometheus-stack, create the `grafana-admin` Secret in the `monitoring` namespace first because the values do not contain credentials:
+
+```bash
+kubectl -n monitoring create secret generic grafana-admin \
+  --from-literal=admin-user=admin \
+  --from-literal=admin-password='<strong-random-password>' \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Install kube-prometheus-stack with the lab profile:
+
+```bash
+helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  --namespace monitoring --create-namespace \
+  --values deployments/platform/monitoring/kube-prometheus-stack-values.yaml \
+  --wait --timeout 10m
+```
+
+Apply the observability/dashboard manifests separately:
+
+```bash
+kubectl apply -f deployments/platform/observability
+kubectl apply -f deployments/platform/dashboards
+```
+
+
+| Dashboard | URL |
+|---|---|
+| Kafka UI | `http://<NODE_IP>:30080` |
+| RedisInsight | `http://<NODE_IP>:30540` |
+| Grafana | `http://<NODE_IP>:30300` |
+| Prometheus | `http://<NODE_IP>:30900` |
+| Jaeger | `http://<NODE_IP>:30686` |
+
+NodePort provides direct access to the node and does not pass through Traefik. If `nexuschat.click` points to the node IP and the firewall permits the port, a URL such as `http://nexuschat.click:30300` may work; however, this is not Traefik TLS/domain routing. For host routing through Traefik, configure DNS for `grafana.nexuschat.click`, `prometheus.nexuschat.click`, `jaeger.nexuschat.click`, `kafka.nexuschat.click`, and `redis.nexuschat.click`, then apply `deployments/platform/monitoring/ingresses.yaml` and `deployments/platform/ingresses.yaml`. These Ingresses do not create DNS or TLS automatically.
+
+## CI/CD source of truth
+
+The current workflow is `.github/workflows/devsecops-platform.yml`.
+
+The workflow triggers on `workflow_dispatch`, `pull_request` to any branch, pushes to `main` or `kafka`, and `v*` tags. The Kubernetes deploy job runs only after a successful push to `main`, requires `build-images` and `build-proxy-variants` to pass, and requires a self-hosted runner with labels `[self-hosted, linux, x64, k3s-lab]`.
+
+- Pull Request: tests, lint, builds, Helm rendering, and security scans.
+- Push to `main`, `kafka`, or a `v*` tag: build images, blocking Trivy scans, SBOM generation, and Cosign signing.
+- Push to `main`: apply Jaeger/OTel and dashboard manifests, then directly deploy the app with Helm into `nexuschat-lab`.
+- ArgoCD is not used.
+
+Stateful dependencies such as Kafka, Redis, Cassandra, MinIO, and PostgreSQL are not installed automatically by the application Helm chart; install them separately or use managed/external services, then update the hostnames in the values. The workflow also does not automatically provision kube-prometheus-stack or Kyverno. A `git pull` alone does not deploy; `git commit` followed by `git push` to `main` can trigger CD.
 
 ## Generated API docs
 
-The following directories are generated from Go Swagger annotations. Do not edit them by hand when the goal is to update API docs:
+The following directories are generated from Swagger annotations; do not edit them manually when updating the API:
 
 - `docs/user`
 - `docs/match`
@@ -32,23 +141,3 @@ Regenerate them with:
 ```bash
 make doc
 ```
-
-## Related Kubernetes assets
-
-| Path | Current role |
-| --- | --- |
-| `deployments/helm/nexuschat` | Application Helm chart for `web`, `chat`, `match`, `user`, `uploader`, `forwarder`, and `ai-service` |
-| `deployments/helm/nexuschat/values.yaml` | Default staging-like profile, nginx ingress, Consul annotation enabled by default, ServiceMonitor/NetworkPolicy enabled |
-| `deployments/helm/nexuschat/values-lab-k3s.yaml` | 4GB K3s lab profile: one replica, Recreate rollout, nginx ingress, no Consul, no ServiceMonitor, no NetworkPolicy |
-| `deployments/gitops/applications/*.yaml` | Optional ArgoCD app definitions; current lab CD does not depend on ArgoCD |
-| `deployments/platform` | Optional platform/lab dashboard manifests: ingress-nginx values, monitoring/logging/security/Consul/ArgoCD references |
-
-## CI/CD source of truth
-
-Current workflow: `.github/workflows/devsecops-platform.yml`.
-
-- PR: test/lint/build/scan/template only.
-- Push `main`/`kafka`/tag `v*`: build, push, scan, SBOM, and sign Docker Hub images.
-- Push `main`: deploy lab K3s namespace `nexuschat-lab` by direct `helm upgrade --install` on self-hosted runner labels `[self-hosted, linux, x64, k3s-lab]`.
-
-Deployment details are in `deploy-k8s-guide.md` and `dockerhub-direct-k8s-rollout.md`.

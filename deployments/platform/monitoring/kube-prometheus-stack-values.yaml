@@ -1,3 +1,4 @@
+# K3s lab profile. Create Secret grafana-admin in namespace monitoring before install.
 grafana:
   enabled: true
   admin:
@@ -6,36 +7,44 @@ grafana:
     passwordKey: admin-password
   persistence:
     enabled: true
-    size: 10Gi
+    size: 2Gi
+  service:
+    type: NodePort
+    port: 80
+    targetPort: 3000
+    nodePort: 30300
   sidecar:
     dashboards:
       enabled: true
     datasources:
       enabled: true
 prometheus:
+  service:
+    type: NodePort
+    nodePort: 30900
   prometheusSpec:
-    replicas: 2
-    retention: 15d
-    retentionSize: 40GB
+    replicas: 1
+    retention: 7d
+    retentionSize: 5GB
     serviceMonitorSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false
     ruleSelectorNilUsesHelmValues: false
     resources:
       requests:
-        cpu: 500m
-        memory: 2Gi
+        cpu: 250m
+        memory: 512Mi
       limits:
-        cpu: "2"
-        memory: 6Gi
+        cpu: "1"
+        memory: 2Gi
 alertmanager:
   alertmanagerSpec:
-    replicas: 2
+    replicas: 1
     storage:
       volumeClaimTemplate:
         spec:
           resources:
             requests:
-              storage: 10Gi
+              storage: 2Gi
 kube-state-metrics:
   metricLabelsAllowlist:
     - pods=[app.kubernetes.io/component,app.kubernetes.io/part-of]

@@ -21,7 +21,7 @@ func TestNewHttpServerUsesPublicEndpointForPresignedURLs(t *testing.T) {
 		Uploader: &config.UploaderConfig{},
 	}
 	cfg.Uploader.S3.Endpoint = "http://minio.minio.svc.cluster.local:9000"
-	cfg.Uploader.S3.PublicEndpoint = "http://minio.192.168.109.131.nip.io"
+	cfg.Uploader.S3.PublicEndpoint = "http://s3.nexuschat.click"
 	cfg.Uploader.S3.Region = "us-east-1"
 	cfg.Uploader.S3.Bucket = "myfilebucket"
 	cfg.Uploader.S3.AccessKey = "labminio"
@@ -40,7 +40,7 @@ func TestNewHttpServerUsesPublicEndpointForPresignedURLs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("presign put object: %v", err)
 	}
-	if got, want := presigned.URL, "http://minio.192.168.109.131.nip.io/myfilebucket/42/test.png"; !strings.HasPrefix(got, want) {
+	if got, want := presigned.URL, "http://s3.nexuschat.click/myfilebucket/42/test.png"; !strings.HasPrefix(got, want) {
 		t.Fatalf("expected presigned URL to start with %q, got %q", want, got)
 	}
 	if got := server.s3PublicEndpoint; got != cfg.Uploader.S3.PublicEndpoint {

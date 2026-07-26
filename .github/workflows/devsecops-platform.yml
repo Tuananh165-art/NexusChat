@@ -175,10 +175,12 @@ jobs:
           scan-ref: .
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          exit-code: "1"
           format: sarif
           output: trivy-fs.sarif
 
       - name: Upload Trivy SARIF
+        if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-fs.sarif
@@ -272,14 +274,15 @@ jobs:
           images: ${{ steps.vars.outputs.image }}
           tags: |
             type=raw,value=${{ steps.vars.outputs.tag }}
-            type=sha,prefix=sha-
+            type=sha,format=long,prefix=sha-
 
-      - name: Build and push
+      - name: Build image
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          push: true
+          push: false
+          load: true
           build-args: |
             VERSION=${{ steps.vars.outputs.tag }}
             SERVICE=${{ matrix.service }}
@@ -294,10 +297,12 @@ jobs:
           image-ref: ${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          exit-code: "1"
           format: sarif
           output: trivy-${{ matrix.name }}.sarif
 
       - name: Upload image scan SARIF
+        if: always()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-${{ matrix.name }}.sarif
@@ -315,11 +320,18 @@ jobs:
           name: sbom-${{ matrix.name }}
           path: sbom-${{ matrix.name }}.spdx.json
 
+      - name: Push image after security gates
+        run: |
+          docker push "${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}"
+          docker push "${{ steps.vars.outputs.image }}:sha-${GITHUB_SHA}"
+
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3
 
-      - name: Sign image
-        run: cosign sign --yes ${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}
+      - name: Sign image tags
+        run: |
+          cosign sign --yes ${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}
+          cosign sign --yes ${{ steps.vars.outputs.image }}:sha-${GITHUB_SHA}
 
   build-proxy-variants:
     name: Build Proxy Variant Images
@@ -349,12 +361,13 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build and push api proxy-upload
+      - name: Build api proxy-upload image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: build/Dockerfile.api
-          push: true
+          push: false
+          load: true
           build-args: |
             VERSION=${{ steps.vars.outputs.tag }}
           tags: |
@@ -363,12 +376,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build and push web proxy-upload
+      - name: Build web proxy-upload image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: build/Dockerfile.web
-          push: true
+          push: false
+          load: true
           build-args: |
             VERSION=${{ steps.vars.outputs.tag }}
           tags: |
@@ -377,12 +391,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Build and push web proxy-upload-v2
+      - name: Build web proxy-upload-v2 image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: build/Dockerfile.web-patch
-          push: true
+          push: false
+          load: true
           build-args: |
             VERSION=${{ steps.vars.outputs.tag }}
           tags: |
@@ -390,6 +405,102 @@ jobs:
             docker.io/tuananh165/nexuschat-web:proxy-upload-v2-${{ steps.vars.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Scan api proxy-upload image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: docker.io/tuananh165/nexuschat-api:proxy-upload-${{ steps.vars.outputs.tag }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          format: sarif
+          output: trivy-proxy-api.sarif
+
+      - name: Upload api proxy scan SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-proxy-api.sarif
+
+      - name: Scan web proxy-upload image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: docker.io/tuananh165/nexuschat-web:proxy-upload-${{ steps.vars.outputs.tag }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          format: sarif
+          output: trivy-proxy-web.sarif
+
+      - name: Upload web proxy scan SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-proxy-web.sarif
+
+      - name: Scan web proxy-upload-v2 image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: docker.io/tuananh165/nexuschat-web:proxy-upload-v2-${{ steps.vars.outputs.tag }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          format: sarif
+          output: trivy-proxy-web-v2.sarif
+
+      - name: Upload web proxy-upload-v2 scan SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-proxy-web-v2.sarif
+
+      - name: Generate proxy image SBOMs
+        uses: anchore/sbom-action@v0
+        with:
+          image: docker.io/tuananh165/nexuschat-api:proxy-upload-${{ steps.vars.outputs.tag }}
+          format: spdx-json
+          output-file: sbom-proxy-api.spdx.json
+
+      - name: Generate web proxy image SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: docker.io/tuananh165/nexuschat-web:proxy-upload-${{ steps.vars.outputs.tag }}
+          format: spdx-json
+          output-file: sbom-proxy-web.spdx.json
+
+      - name: Generate web proxy-upload-v2 SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: docker.io/tuananh165/nexuschat-web:proxy-upload-v2-${{ steps.vars.outputs.tag }}
+          format: spdx-json
+          output-file: sbom-proxy-web-v2.spdx.json
+
+      - name: Upload proxy image SBOMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-proxy-images
+          path: sbom-proxy-*.spdx.json
+
+      - name: Push proxy images after security gates
+        run: |
+          docker push docker.io/tuananh165/nexuschat-api:proxy-upload
+          docker push docker.io/tuananh165/nexuschat-api:proxy-upload-${{ steps.vars.outputs.tag }}
+          docker push docker.io/tuananh165/nexuschat-web:proxy-upload
+          docker push docker.io/tuananh165/nexuschat-web:proxy-upload-${{ steps.vars.outputs.tag }}
+          docker push docker.io/tuananh165/nexuschat-web:proxy-upload-v2
+          docker push docker.io/tuananh165/nexuschat-web:proxy-upload-v2-${{ steps.vars.outputs.tag }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign proxy images
+        run: |
+          cosign sign --yes docker.io/tuananh165/nexuschat-api:proxy-upload
+          cosign sign --yes docker.io/tuananh165/nexuschat-api:proxy-upload-${{ steps.vars.outputs.tag }}
+          cosign sign --yes docker.io/tuananh165/nexuschat-web:proxy-upload
+          cosign sign --yes docker.io/tuananh165/nexuschat-web:proxy-upload-${{ steps.vars.outputs.tag }}
+          cosign sign --yes docker.io/tuananh165/nexuschat-web:proxy-upload-v2
+          cosign sign --yes docker.io/tuananh165/nexuschat-web:proxy-upload-v2-${{ steps.vars.outputs.tag }}
 
   deploy-lab-k8s:
     name: Deploy to K8s Lab
@@ -434,18 +545,11 @@ jobs:
           kubectl get nodes -o wide
           kubectl create namespace "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
-      - name: Ensure cert-manager and Let's Encrypt issuer
-        run: |
-          set -euo pipefail
-          helm repo add jetstack https://charts.jetstack.io
-          helm repo update
-          helm upgrade --install cert-manager jetstack/cert-manager \
-            --namespace cert-manager \
-            --create-namespace \
-            --set crds.enabled=true \
-            --wait \
-            --timeout 5m
-          kubectl wait --for=condition=Established crd/certificates.cert-manager.io crd/clusterissuers.cert-manager.io --timeout=120s
+      - name: Deploy Jaeger and OpenTelemetry Collector
+        run: kubectl apply -f deployments/platform/observability
+
+      - name: Deploy dashboard applications
+        run: kubectl apply -f deployments/platform/dashboards
 
       - name: Ensure TURN shared secret
         env:
@@ -475,11 +579,7 @@ jobs:
         env:
           TAG: ${{ steps.vars.outputs.tag }}
         run: |
-          # Do not use helm --wait/--atomic here. Helm waits on cert-manager
-          # Certificate readiness too, and Let's Encrypt HTTP-01 can remain
-          # InProgress while DNS/public reachability is being fixed. The next
-          # steps wait on runtime workloads explicitly so app rollout failures
-          # still fail the pipeline with clearer diagnostics.
+          # Wait explicitly for application rollouts so failures are reported with clear diagnostics.
           helm upgrade --install nexuschat deployments/helm/nexuschat \
             --namespace "$KUBE_NAMESPACE" \
             --create-namespace \
@@ -504,12 +604,6 @@ jobs:
           else
             echo "coturn DaemonSet is not rendered in this lab profile; skipping TURN rollout wait."
           fi
-
-      - name: Show TLS certificate status
-        if: always()
-        run: |
-          kubectl -n "$KUBE_NAMESPACE" get certificate,certificaterequest,order,challenge -o wide || true
-          kubectl -n "$KUBE_NAMESPACE" describe certificate nexuschat-click-tls || true
 
       - name: Show deployed images
         run: |

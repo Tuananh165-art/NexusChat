@@ -5,8 +5,8 @@ global:
   environment: lab
   deploymentStrategy:
     type: Recreate
-  # Leave domain and tlsSecretName empty to access the lab by server IP.
-  # Example: http://<server-ip>
+  # The app is routed by this Traefik host. Set it to the DNS name used by the lab.
+  # Keep tlsSecretName empty for the HTTP-only profile.
   domain: nexuschat.click
   tlsSecretName: ""
   podAnnotations: {}
@@ -26,36 +26,27 @@ imageDefaults:
 
 ingress:
   enabled: true
-  className: nginx
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: "32m"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
-    nginx.ingress.kubernetes.io/proxy-send-timeout: "180"
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  className: traefik
+  annotations: {}
 
 certManager:
-  enabled: true
+  enabled: false
   clusterIssuer:
-    create: true
+    create: false
     name: letsencrypt-prod
     email: admin@nexuschat.click
     server: https://acme-v02.api.letsencrypt.org/directory
     privateKeySecretName: letsencrypt-prod-account-key
   certificate:
-    create: true
-    secretName: nexuschat-click-tls
-    dnsNames:
-      - nexuschat.click
+    create: false
+    secretName: ""
+    dnsNames: []
 
 serviceMonitor:
   enabled: false
 
 networkPolicy:
   enabled: false
-
-consul:
-  serviceDefaults:
-    enabled: false
 
 services:
   web:
@@ -122,14 +113,14 @@ services:
       fullname: docker.io/tuananh165/nexuschat-api:proxy-upload
     replicas: 1
     ingress:
-      className: nginx
+      className: traefik
       traefikForwardAuth:
         enabled: false
     env:
       UPLOADER_HTTP_SERVER_MAXBODYBYTE: "10485760"
       UPLOADER_HTTP_SERVER_MAXMEMORYBYTE: "4194304"
       UPLOADER_S3_ENDPOINT: http://minio.minio.svc.cluster.local:9000
-      UPLOADER_S3_PUBLICENDPOINT: http://minio-api.192.168.109.131.nip.io
+      UPLOADER_S3_PUBLICENDPOINT: http://s3.nexuschat.click
     resources:
       requests:
         cpu: 25m
@@ -162,7 +153,9 @@ services:
       - python -m alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8090
     env:
       AI_ENVIRONMENT: lab
-      REDIS_URL: redis://redis-master.redis.svc.cluster.local:6379/0
+      # The AI service currently accepts a Redis URL but does not require Redis for startup.
+      # Keep it on a Redis Cluster member when the optional integration is enabled.
+      REDIS_URL: redis://redis-redis-cluster-0.redis-redis-cluster-headless.redis.svc.cluster.local:6379/0
     resources:
       requests:
         cpu: 50m

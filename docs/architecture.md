@@ -1,71 +1,82 @@
 # NexusChat Architecture
 
-NexusChat hiện là hệ thống chat realtime additive gồm các Go service hiện hữu và ba service nghiệp vụ mới. Runtime lab chạy HTTP/`ws://` theo yêu cầu, không có TLS, Web Push hoặc WebRTC.
+NexusChat is a Go/Next.js real-time chat system with a FastAPI AI service. The Kubernetes lab runs HTTP/`ws://` through Traefik; production requires TLS, secret management, and stricter network policies.
+
+## Runtime flow
+
+```text
+Browser
+  │ HTTP + WebSocket
+  ▼
+Traefik Ingress
+  ├── web
+  ├── chat ── Safety gRPC
+  ├── match ── Discovery/Safety gRPC
+  ├── user
+  ├── uploader ── MinIO + ForwardAuth
+  └── ai-service ── PostgreSQL
+
+Go services ── Kafka + Redis Cluster + Cassandra
+Go/Traefik traces ── OpenTelemetry Collector ── Jaeger
+Go/Python metrics ── Prometheus ── Grafana
+```
 
 ## Service boundaries
 
 | Service | State | Internal contract |
 |---|---|---|
-| chat | Cassandra messages/channels, Redis sessions | Kafka chat events, Safety gRPC |
-| match | Redis waitlist | Chat gRPC, Safety gRPC, Discovery gRPC |
+| chat | Cassandra messages/channels, Redis sessions | Kafka events, Safety gRPC |
+| match | Redis waitlist | Chat, Safety, Discovery gRPC |
 | safety | Cassandra decisions/reports/rules, Redis risk/rate-limit/block cache | Kafka safety events |
 | discovery | Cassandra profile/match/feedback, Redis score/cache | Kafka discovery events |
-| workspace | Cassandra item/collection, Redis board/reminder/lock | Kafka workspace events, Chat authorization |
-| user | Redis sessions, Cassandra/user state | user gRPC |
+| workspace | Cassandra items/collections, Redis board/reminder/lock | Kafka events, Chat authorization |
+| user | Redis sessions and user state | User gRPC |
 | forwarder | Redis routing | Kafka fanout |
-| ai-service | PostgreSQL/Alembic | HTTP optional semantic enrichment |
+| ai-service | PostgreSQL/Alembic | Optional HTTP semantic enrichment |
 
-## Safety flow
+## Platform responsibilities
 
-`chat.BroadcastTextMessage` gọi Safety gRPC trước khi lưu/broadcast. Rule engine tính risk score:
+| Component | Local Compose | Kubernetes lab |
+|---|---|---|
+| Ingress | Traefik container `reverse-proxy` | Traefik IngressClass `traefik` |
+| Metrics | Prometheus container | kube-prometheus-stack |
+| Dashboards | Grafana container | kube-prometheus-stack Grafana NodePort |
+| Traces | Jaeger + OTel Collector | Jaeger/OTel manifests in `deployments/platform/observability` |
+| Kafka dashboard | Not available by default | Kafka UI NodePort `30080` |
+| Redis dashboard | Not available by default | RedisInsight NodePort `30540` |
+| Policy | Not applied | Kyverno |
 
-- 0–39: allow
-- 40–69: warn/che nội dung
-- 70–100: block
+## Data flow
 
-Flood, repeat spam, scam pattern, toxic pattern và block list dùng Redis. Quyết định cảnh báo/chặn được lưu Cassandra và publish `nexuschat.safety.events.v1`. Khi Safety timeout, chat giữ degraded mode bằng local hard-rule và vẫn phát event để xử lý lại.
+Chat calls Safety before saving or broadcasting. Match filters blocks/risk and then calls Discovery to rank candidates. Workspace verifies channel membership through Chat. Kafka uses versioned envelopes, outbox, `processed_events`, retries, and a DLQ; Redis provides caching, locking, rate limiting, waitlists, and deduplication; Cassandra retains long-term business data.
 
-## Discovery flow
+## Helm deployment model
 
-`match` lấy candidate từ Redis, lọc block/risk rồi gọi Discovery gRPC. Điểm xếp hạng gồm interest overlap, language, conversation goal, reputation và thời gian chờ. Pair lock dùng Redis; nếu Discovery lỗi, FIFO matching cũ được dùng làm fallback.
+`deployments/helm/nexuschat/values.yaml` is the base values file. `values-lab-k3s.yaml` is the lab override and must be passed after the base values file:
 
-## Workspace flow
+```bash
+helm upgrade --install nexuschat deployments/helm/nexuschat \
+  -n nexuschat-lab --create-namespace \
+  -f deployments/helm/nexuschat/values.yaml \
+  -f deployments/helm/nexuschat/values-lab-k3s.yaml
+```
 
-Workspace xác thực channel membership qua token Cassandra. Task/note/bookmark được lưu hai projection Cassandra theo channel và item ID. Mọi thay đổi phát Kafka và gửi WebSocket đến client. Reminder dùng Redis sorted set + lease để nhiều replica không xử lý trùng; dữ liệu quá hạn vẫn được đọc từ Cassandra.
+The Helm chart deploys only application workloads. Kafka, Redis, Cassandra, MinIO, PostgreSQL, kube-prometheus-stack, and Kyverno are platform dependencies installed separately.
 
-## Kafka reliability
+## Dashboard URL model
 
-Envelope gồm `event_id`, `event_type`, `schema_version`, `occurred_at`, `producer`, `aggregate_id`, correlation/causation ID và payload. Consumer dùng `processed_events`, bounded worker pool, retry backoff, outbox relay và DLQ. Offset chỉ commit sau khi handler nghiệp vụ thành công.
+NodePorts provide direct access through the node IP:
 
-## Data migration
+```text
+Kafka UI     : <NODE_IP>:30080
+RedisInsight : <NODE_IP>:30540
+Grafana      : <NODE_IP>:30300
+Prometheus   : <NODE_IP>:30900
+Jaeger       : <NODE_IP>:30686
+```
 
-`cassandra/migrations/002_replace_realtime_services.cql` drop:
-
-- `notifications_by_user`
-- `push_subscriptions_by_user`
-- `notification_preferences`
-- `calls_by_user`
-- `calls_by_channel`
-
-Giữ `processed_events` và `outbox_events` cho service mới. Chỉ chạy migration sau khi backup keyspace.
-
-## Deployment
-
-Helm chart dùng ingress-nginx HTTP-only:
-
-- `global.tlsSecretName: ""`
-- `nginx.ingress.kubernetes.io/ssl-redirect: "false"`
-- `nexuschat.click`
-- `/api/safety`
-- `/api/discovery`
-- `/api/workspace`
-
-Ba image runtime mới:
-
-- `docker.io/tuananh165/nexuschat-safety:<sha>`
-- `docker.io/tuananh165/nexuschat-discovery:<sha>`
-- `docker.io/tuananh165/nexuschat-workspace:<sha>`
+`nexuschat.click:<port>` works only when the domain DNS points to the node IP and the firewall allows the port. NodePorts bypass Traefik and do not provide TLS automatically. The standard production approach is to use subdomains with Traefik Ingress and TLS.
 
 ## Security note
 
-HTTP-only không phù hợp production: token, cookie và nội dung chat có thể bị nghe lén; Google OAuth callback và các browser secure-context API cũng có thể bị giới hạn. Cấu hình hiện tại chỉ đáp ứng lab/dev không TLS.
+HTTP-only and public NodePorts are not suitable for production: tokens, cookies, chat content, and dashboards could be accessed without authorization. Production requires TLS, dashboard authentication, VPN/allowlisting, Kyverno Enforce, image signature verification, and a secret manager.

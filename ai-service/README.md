@@ -45,7 +45,7 @@ AI_REQUEST_TIMEOUT_SECONDS=60
 DATABASE_URL=postgresql+asyncpg://nexuschat_ai:nexuschat_ai@localhost:5432/nexuschat_ai
 REDIS_URL=redis://localhost:6379/0
 CHAT_SERVICE_BASE_URL=http://localhost/api/chat
-OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 ```
 
 Do not commit real `.env` files or provider keys.

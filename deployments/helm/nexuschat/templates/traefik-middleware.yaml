@@ -1,7 +1,8 @@
 {{- range $name, $svc := .Values.services }}
 {{- $svcIngress := default (dict) $svc.ingress }}
 {{- $forwardAuth := default (dict) $svcIngress.traefikForwardAuth }}
-{{- if and $.Values.ingress.enabled $svc.enabled $svc.path $forwardAuth.enabled }}
+{{- $stripPrefix := default (dict) $svcIngress.traefikStripPrefix }}
+{{- if and $.Values.ingress.enabled $svc.enabled $svc.path (or $forwardAuth.enabled $stripPrefix.enabled) }}
 ---
 apiVersion: {{ default "traefik.io/v1alpha1" $.Values.traefik.apiVersion }}
 kind: Middleware
@@ -10,6 +11,7 @@ metadata:
   labels:
     {{- include "nexuschat.serviceLabels" (dict "root" $ "name" $name) | nindent 4 }}
 spec:
+  {{- if $forwardAuth.enabled }}
   forwardAuth:
     address: {{ default (printf "http://chat.%s.svc.cluster.local:%v/api/chat/forwardauth" $.Release.Namespace $.Values.services.chat.containerPort) $forwardAuth.address | quote }}
     trustForwardHeader: {{ default true $forwardAuth.trustForwardHeader }}
@@ -17,5 +19,12 @@ spec:
       {{- range $header := default (list "X-Channel-Id") $forwardAuth.authResponseHeaders }}
       - {{ $header | quote }}
       {{- end }}
+  {{- else if $stripPrefix.enabled }}
+  stripPrefix:
+    prefixes:
+      {{- range $prefix := $stripPrefix.prefixes }}
+      - {{ $prefix | quote }}
+      {{- end }}
+  {{- end }}
 {{- end }}
 {{- end }}

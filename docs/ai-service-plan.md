@@ -104,7 +104,7 @@ Smoke tests:
 curl -i http://localhost:8090/health
 curl -X POST http://localhost:8090/v1/assistant/rewrite \
   -H 'Content-Type: application/json' \
-  -d '{"text":"xin chao toi muon viet lai cau nay","tone":"professional","locale":"Vietnamese"}'
+  -d '{"text":"hello, please rewrite this sentence","tone":"professional","locale":"en-US"}'
 ```
 
 Kubernetes checks:

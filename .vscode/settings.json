@@ -1,5 +1,0 @@
-{
-  "files.associations": {
-    "**/deployments/helm/**/templates/*.yaml": "helm"
-  }
-}

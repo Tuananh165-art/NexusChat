@@ -1,106 +1,98 @@
-# NexusChat K3s Lab Deployment Guide (4GB RAM / 50GB disk)
+# NexusChat Kubernetes/K3s Lab Deployment Guide
 
-This runbook deploys the lab environment represented by the current source. Production can use the same Helm chart, but it needs stronger resource sizing, secrets, TLS, DNS, storage, and observability.
+This document describes the current NexusChat Kubernetes lab deployment on K3s with approximately 4GB RAM/50GB disk. The current model uses Traefik, direct Helm deployment, Prometheus/Grafana, Jaeger/OpenTelemetry Collector, and Kyverno. ArgoCD, Consul, ECK/ELK, and ingress-nginx are not used.
 
-Current target lab:
+## 1. Distinguish the Helm files
 
-- Server/K3s ingress IP: `IP`.
-- Namespace app: `nexuschat-lab`.
-- Ingress controller: ingress-nginx.
-- App Helm release: `nexuschat`.
-- App chart: `deployments/helm/nexuschat`.
-- Lab values: `deployments/helm/nexuschat/values-lab-k3s.yaml`.
-- Registry: Docker Hub `docker.io/tuananh165`.
-- Current CI/CD: GitHub Actions self-hosted runner + direct Helm deploy, not ArgoCD.
+`deployments/helm/nexuschat/values-lab-k3s.yaml` **is not an independent deployment file**. It is the lab override file. Helm must use the chart, the default values, and the lab values:
 
-## 0. What not to run on a 4GB lab by default
+```text
+deployments/helm/nexuschat/Chart.yaml
+  ├── values.yaml                 # base/staging-like configuration
+  ├── values-lab-k3s.yaml         # override lab
+  └── templates/*.yaml             # Deployment, Service, Ingress, policy...
+```
 
-Do not install these on the small lab unless you have confirmed free RAM/disk:
-
-- Full ELK/ECK/Elasticsearch/Kibana/Filebeat.
-- Full kube-prometheus-stack.
-- Consul service mesh.
-- HA Kafka/Cassandra/Redis/Postgres/MinIO.
-- ArgoCD as part of the critical deploy path.
-
-The app chart also does not install stateful dependencies. Install dependencies separately, or use managed/external services and override Helm values.
-
-## 1. Install K3s without bundled Traefik
+Standard deployment command:
 
 ```bash
-curl -sfL https://get.k3s.io | sudo INSTALL_K3S_EXEC="--disable traefik --write-kubeconfig-mode 644" sh -
+helm upgrade --install nexuschat deployments/helm/nexuschat \
+  --namespace nexuschat-lab \
+  --create-namespace \
+  --values deployments/helm/nexuschat/values.yaml \
+  --values deployments/helm/nexuschat/values-lab-k3s.yaml \
+  --set-string imageDefaults.tag="$GIT_SHA" \
+  --wait --timeout 10m
+```
 
+Helm merges values in order; the lab file is applied afterward and overrides the base file. The app chart creates only NexusChat workloads; it does not install Kafka, Redis, Cassandra, MinIO, PostgreSQL, Prometheus, Grafana, Jaeger, Traefik, or Kyverno.
+
+## 2. Current lab profile
+
+- App namespace: `nexuschat-lab`.
+- Monitoring namespace: `monitoring`.
+- Ingress class: `traefik`.
+- App host: `nexuschat.click`.
+- TLS: disabled in the lab; `global.tlsSecretName` is empty and cert-manager is not used.
+- Deployment strategy: `Recreate` with one replica for the lab profile.
+- App tracing: disabled in `values-lab-k3s.yaml`; the Collector can still run for workloads configured for OTLP.
+- App chart ServiceMonitor and NetworkPolicy: disabled in the lab profile.
+
+DNS `nexuschat.click` must point to the node/Traefik IP. Helm does not create DNS records, firewall rules, or TLS certificates.
+
+## 3. Install K3s and Helm
+
+If installing a new K3s cluster, keep the K3s default Traefik:
+
+```bash
+curl -sfL https://get.k3s.io | sudo sh -
 mkdir -p ~/.kube
 sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
 sudo chown "$USER:$USER" ~/.kube/config
 export KUBECONFIG=~/.kube/config
-echo 'export KUBECONFIG=~/.kube/config' >> ~/.bashrc
-
 kubectl get nodes -o wide
+kubectl get pods -n kube-system
+kubectl get ingressclass
 ```
 
-## 2. Install Helm and chart repos
+Install Helm and repositories:
 
 ```bash
 curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
 helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo add kyverno https://kyverno.github.io/kyverno/
 helm repo update
+helm version
 ```
 
-## 3. Clone or update source
-
-```bash
-sudo mkdir -p /opt
-sudo chown "$USER:$USER" /opt
-cd /opt
-[ -d NexusChat/.git ] || git clone https://github.com/Tuananh165-art/NexusChat.git
-cd /opt/NexusChat
-git pull --ff-only
-```
+Do not install `ingress-nginx`; Traefik is the only Ingress controller.
 
 ## 4. Create namespaces
 
 ```bash
-for ns in ingress-nginx nexuschat-lab redis kafka cassandra minio postgres monitoring argocd redis-ui; do
+for ns in nexuschat-lab monitoring kafka redis redis-ui cassandra minio postgres; do
   kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
 done
 ```
 
-## 5. Install ingress-nginx
+## 5. Install runtime dependencies
+
+The app requires Kafka, Redis Cluster, Cassandra, MinIO, and PostgreSQL for the AI service. Helm or external services can be used. Before deploying the app, verify the DNS names used by the values:
+
+| Dependency | Host used by the lab profile |
+|---|---|
+| Kafka | `kafka.kafka.svc.cluster.local:9092` |
+| Redis Cluster | `redis-redis-cluster-0/1/2.redis-redis-cluster-headless.redis.svc.cluster.local:6379` |
+| Cassandra | `cassandra.cassandra.svc.cluster.local:9042` |
+| MinIO | `minio.minio.svc.cluster.local:9000` |
+| AI service Redis (optional integration) | `redis-redis-cluster-0.redis-redis-cluster-headless.redis.svc.cluster.local:6379` |
+### Redis Cluster
+
+Go services use a Redis Cluster client, not standalone Redis. The AI service currently accepts only `REDIS_URL` configuration and does not require Redis to start; if Redis integration is enabled, the lab values point to the first Redis Cluster member. If the AI deployment uses a library that requires standalone Redis, provision an additional standalone Redis and override `services.ai-service.env.REDIS_URL`.
 
 ```bash
-helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
-  --namespace ingress-nginx \
-  --set controller.replicaCount=1 \
-  --set controller.metrics.enabled=false \
-  --set controller.resources.requests.cpu=50m \
-  --set controller.resources.requests.memory=96Mi \
-  --set controller.resources.limits.cpu=300m \
-  --set controller.resources.limits.memory=256Mi
-
-kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
-kubectl -n ingress-nginx get svc,pods -o wide
-```
-
-## 6. Install lightweight dependencies
-
-Set lab credentials in shell. These are examples; use stronger values when exposed outside a private lab.
-
-```bash
-export REDIS_PASSWORD='lab-redis-pass'
-export CASSANDRA_PASSWORD='lab-cassandra-pass'
-export MINIO_ACCESS_KEY='labminio'
-export MINIO_SECRET_KEY='lab-minio-secret'
-export AI_POSTGRES_PASSWORD='lab-postgres-pass'
-```
-
-### 6.1 Redis Cluster
-
-Current Go code uses Redis Cluster client, so use Redis Cluster, not standalone Redis.
-
-```bash
-helm uninstall redis -n redis || true
+export REDIS_PASSWORD='change-this-lab-password'
 helm upgrade --install redis bitnami/redis-cluster \
   --namespace redis \
   --set image.repository=bitnamilegacy/redis-cluster \
@@ -111,323 +103,199 @@ helm upgrade --install redis bitnami/redis-cluster \
   --set cluster.nodes=3 \
   --set cluster.replicas=0 \
   --set persistence.enabled=true \
-  --set persistence.size=1Gi \
-  --set redis.resources.requests.cpu=25m \
-  --set redis.resources.requests.memory=96Mi \
-  --set redis.resources.limits.cpu=200m \
-  --set redis.resources.limits.memory=192Mi
+  --set persistence.size=1Gi
 kubectl -n redis get pods,svc -o wide
 ```
 
-Expected Helm service names in `values-lab-k3s.yaml` point at `redis-redis-cluster-0/1/2.redis-redis-cluster-headless.redis.svc.cluster.local:6379`.
+### Kafka
 
-### 6.2 Kafka
-
-Preferred lightweight official-image manifest if Bitnami image pulls are unreliable:
+Kafka must provide a Service named `kafka` in the `kafka` namespace and listen on `9092`. A single-node KRaft StatefulSet can be used for the lab, or a controlled Kafka operator. Check it with:
 
 ```bash
-helm uninstall kafka -n kafka || true
-cat <<'EOF' | kubectl apply -f -
-apiVersion: v1
-kind: Service
-metadata:
-  name: kafka
-  namespace: kafka
-spec:
-  selector:
-    app: kafka
-  ports:
-    - name: client
-      port: 9092
-      targetPort: 9092
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: kafka
-  namespace: kafka
-spec:
-  serviceName: kafka
-  replicas: 1
-  selector:
-    matchLabels:
-      app: kafka
-  template:
-    metadata:
-      labels:
-        app: kafka
-    spec:
-      containers:
-        - name: kafka
-          image: confluentinc/cp-kafka:7.6.0
-          ports:
-            - containerPort: 9092
-              name: client
-            - containerPort: 9093
-              name: controller
-          env:
-            - name: KAFKA_PROCESS_ROLES
-              value: controller,broker
-            - name: KAFKA_NODE_ID
-              value: "1"
-            - name: KAFKA_CONTROLLER_QUORUM_VOTERS
-              value: "1@localhost:9093"
-            - name: KAFKA_LISTENERS
-              value: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
-              value: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
-            - name: KAFKA_INTER_BROKER_LISTENER_NAME
-              value: PLAINTEXT
-            - name: KAFKA_CONTROLLER_LISTENER_NAMES
-              value: CONTROLLER
-            - name: KAFKA_ADVERTISED_LISTENERS
-              value: PLAINTEXT://kafka.kafka.svc.cluster.local:9092
-            - name: CLUSTER_ID
-              value: ciWo7IWazngRchmPES6q5A==
-            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
-              value: "1"
-            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
-              value: "1"
-            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
-              value: "1"
-            - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
-              value: "true"
-            - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
-              value: "0"
-            - name: KAFKA_HEAP_OPTS
-              value: "-Xms256m -Xmx512m"
-          resources:
-            requests:
-              cpu: 100m
-              memory: 512Mi
-            limits:
-              cpu: 500m
-              memory: 900Mi
-          volumeMounts:
-            - name: data
-              mountPath: /var/lib/kafka/data
-  volumeClaimTemplates:
-    - metadata:
-        name: data
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        resources:
-          requests:
-            storage: 5Gi
-EOF
-kubectl -n kafka rollout status statefulset/kafka --timeout=300s
+kubectl -n kafka get pods,svc
+kubectl -n kafka get svc kafka
 ```
 
-### 6.3 Cassandra
+### Cassandra
+
+The lab manifest can be applied:
 
 ```bash
-helm uninstall cassandra -n cassandra || true
-cat <<'EOF' | kubectl apply -f -
-apiVersion: v1
-kind: Service
-metadata:
-  name: cassandra
-  namespace: cassandra
-spec:
-  selector:
-    app: cassandra
-  ports:
-    - name: cql
-      port: 9042
-      targetPort: 9042
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: cassandra
-  namespace: cassandra
-spec:
-  serviceName: cassandra
-  replicas: 1
-  selector:
-    matchLabels:
-      app: cassandra
-  template:
-    metadata:
-      labels:
-        app: cassandra
-    spec:
-      containers:
-        - name: cassandra
-          image: cassandra:4.0
-          ports:
-            - containerPort: 9042
-              name: cql
-          env:
-            - name: CASSANDRA_CLUSTER_NAME
-              value: NexusChat
-            - name: CASSANDRA_SEEDS
-              value: cassandra
-            - name: MAX_HEAP_SIZE
-              value: 512M
-            - name: HEAP_NEWSIZE
-              value: 128M
-          resources:
-            requests:
-              cpu: 100m
-              memory: 768Mi
-            limits:
-              cpu: 700m
-              memory: 1200Mi
-          volumeMounts:
-            - name: data
-              mountPath: /var/lib/cassandra
-  volumeClaimTemplates:
-    - metadata:
-        name: data
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        resources:
-          requests:
-            storage: 8Gi
-EOF
-kubectl -n cassandra rollout status statefulset/cassandra --timeout=600s
+kubectl apply -f deployments/platform/cassandra/cassandra.yaml
+kubectl -n cassandra get pods,svc,pvc
 ```
 
-Apply schema:
+After Cassandra is Ready, apply `cassandra/init.cql` and the migration `cassandra/migrations/002_replace_realtime_services.cql` according to the project backup/schema procedure. The migration deletes old tables; do not run it before backing up the keyspace.
+
+### MinIO and PostgreSQL
+
+MinIO requires the `myfilebucket` bucket. PostgreSQL requires the `nexuschat_ai` database and a user/password matching `DATABASE_URL`. Bitnami Helm or a managed service can be used, but update `nexuschat-runtime` and the hostnames in the values if the Service name is different.
+
+## 6. Install monitoring and tracing
+
+### Prometheus and Grafana
+
+Create the Grafana Secret before installing the chart. The values only reference the Secret and do not contain the password:
 
 ```bash
-kubectl delete pod cassandra-schema-client -n cassandra --ignore-not-found
-kubectl run cassandra-schema-client -n cassandra --restart=Never --image=python:3.12-slim --env CASSANDRA_HOST=cassandra.cassandra.svc.cluster.local --command -- sleep 3600
-kubectl wait --for=condition=Ready pod/cassandra-schema-client -n cassandra --timeout=180s
-kubectl cp cassandra/init.cql cassandra/cassandra-schema-client:/tmp/init.cql
-kubectl exec -n cassandra cassandra-schema-client -- sh -lc "pip install cassandra-driver && python -c \"from cassandra.cluster import Cluster; import os, pathlib; schema=pathlib.Path('/tmp/init.cql').read_text(); cluster=Cluster([os.environ['CASSANDRA_HOST']], port=9042); session=cluster.connect(); [session.execute(stmt.strip() + ';') for stmt in schema.split(';') if stmt.strip()]; cluster.shutdown(); print('schema applied')\""
-kubectl delete pod cassandra-schema-client -n cassandra --ignore-not-found
-```
-
-### 6.4 MinIO and bucket
-
-```bash
-helm uninstall minio -n minio || true
-kubectl delete deployment minio -n minio --ignore-not-found
-kubectl delete svc minio -n minio --ignore-not-found
-
-kubectl create deployment minio -n minio --image=minio/minio:RELEASE.2023-07-11T21-29-34Z --port=9000 -- minio server /data --console-address :9001
-kubectl set env deployment/minio -n minio MINIO_ROOT_USER="$MINIO_ACCESS_KEY" MINIO_ROOT_PASSWORD="$MINIO_SECRET_KEY"
-kubectl set resources deployment/minio -n minio --requests=cpu=50m,memory=128Mi --limits=cpu=300m,memory=384Mi
-kubectl expose deployment minio -n minio --name=minio --port=9000 --target-port=9000
-kubectl rollout status deployment/minio -n minio --timeout=180s
-
-kubectl run minio-mc -n minio --rm -i --restart=Never --image=minio/mc:RELEASE.2023-07-11T23-30-44Z --command -- /bin/sh -c "mc alias set local http://minio.minio.svc.cluster.local:9000 $MINIO_ACCESS_KEY $MINIO_SECRET_KEY && mc mb --ignore-existing local/myfilebucket && mc anonymous set private local/myfilebucket"
-```
-
-If you need console UI, expose/create a console service and use `deployments/platform/ingresses.yaml` only after matching service names.
-
-### 6.5 PostgreSQL for AI service
-
-```bash
-helm upgrade --install ai-postgres bitnami/postgresql \
-  --namespace postgres \
-  --set auth.database=nexuschat_ai \
-  --set auth.username=nexuschat_ai \
-  --set auth.password="$AI_POSTGRES_PASSWORD" \
-  --set primary.persistence.enabled=true \
-  --set primary.persistence.size=5Gi \
-  --set primary.resources.requests.cpu=50m \
-  --set primary.resources.requests.memory=128Mi \
-  --set primary.resources.limits.cpu=300m \
-  --set primary.resources.limits.memory=384Mi
-kubectl -n postgres rollout status statefulset/ai-postgres-postgresql --timeout=300s
-```
-
-Check all dependencies:
-
-```bash
-kubectl get pods -n redis
-kubectl get pods -n kafka
-kubectl get pods -n cassandra
-kubectl get pods -n minio
-kubectl get pods -n postgres
-```
-
-## 6.1. Enable HTTPS with cert-manager and Let's Encrypt
-
-Chrome/Edge require a secure origin for Web Push. The lab Helm values use host `nexuschat.click` and TLS secret `nexuschat-click-tls`, so install cert-manager and let Let's Encrypt populate that secret.
-
-Prerequisite: public DNS for `nexuschat.click` must resolve to the ingress IP `192.168.109.131` from both the cluster and Let's Encrypt. If DNS is missing, cert-manager will stay pending with an HTTP-01 self-check error like `lookup nexuschat.click ... no such host`.
-
-```bash
-helm repo add jetstack https://charts.jetstack.io
-helm repo update
-
-helm upgrade --install cert-manager jetstack/cert-manager \
-  --namespace cert-manager \
-  --create-namespace \
-  --set crds.enabled=true \
-  --wait \
-  --timeout 5m
-
-kubectl wait --for=condition=Established \
-  crd/certificates.cert-manager.io \
-  crd/clusterissuers.cert-manager.io \
-  --timeout=120s
-```
-
-The chart renders:
-
-- `ClusterIssuer/letsencrypt-prod`, using HTTP-01 through ingress class `nginx`.
-- `Certificate/nexuschat-click-tls` in namespace `nexuschat-lab`.
-- Ingress TLS references to secret `nexuschat-click-tls`.
-
-After Helm deploy, verify issuance:
-
-```bash
-kubectl get clusterissuer letsencrypt-prod -o wide
-kubectl -n nexuschat-lab get certificate,certificaterequest,order,challenge -o wide
-kubectl -n nexuschat-lab describe certificate nexuschat-click-tls
-kubectl -n nexuschat-lab get secret nexuschat-click-tls
-```
-
-Expected final state:
-
-```text
-ClusterIssuer/letsencrypt-prod READY=True
-Certificate/nexuschat-click-tls READY=True
-secret/nexuschat-click-tls exists
-```
-
-## 7. Create runtime secret
-
-Use real OAuth/AI values if testing those features. Placeholders allow pods to start but will not make OAuth/AI work.
-
-```bash
-export GOOGLE_CLIENT_ID='replace-me'
-export GOOGLE_CLIENT_SECRET='replace-me'
-export AI_ENDPOINT='https://replace-me-openai-compatible/v1'
-export AI_API_KEY='replace-me'
-export AI_MODEL='replace-me'
-export CALL_TURN_SHAREDSECRET='lab-turn-secret-change-me'
-
-kubectl create secret generic nexuschat-runtime \
-  --namespace nexuschat-lab \
-  --from-literal=CHAT_JWT_SECRET='lab-jwt-secret-change-me' \
-  --from-literal=CALL_TURN_SHAREDSECRET="$CALL_TURN_SHAREDSECRET" \
-  --from-literal=REDIS_PASSWORD="$REDIS_PASSWORD" \
-  --from-literal=CASSANDRA_USER='admin' \
-  --from-literal=CASSANDRA_PASSWORD="$CASSANDRA_PASSWORD" \
-  --from-literal=UPLOADER_S3_ACCESSKEY="$MINIO_ACCESS_KEY" \
-  --from-literal=UPLOADER_S3_SECRETKEY="$MINIO_SECRET_KEY" \
-  --from-literal=USER_OAUTH_GOOGLE_CLIENTID="$GOOGLE_CLIENT_ID" \
-  --from-literal=USER_OAUTH_GOOGLE_CLIENTSECRET="$GOOGLE_CLIENT_SECRET" \
-  --from-literal=DATABASE_URL="postgresql+asyncpg://nexuschat_ai:$AI_POSTGRES_PASSWORD@ai-postgres-postgresql.postgres.svc.cluster.local:5432/nexuschat_ai" \
-  --from-literal=AI_ENDPOINT="$AI_ENDPOINT" \
-  --from-literal=AI_API_KEY="$AI_API_KEY" \
-  --from-literal=AI_MODEL="$AI_MODEL" \
-  --from-literal=AI_POSTGRES_PASSWORD="$AI_POSTGRES_PASSWORD" \
+kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n monitoring create secret generic grafana-admin \
+  --from-literal=admin-user=admin \
+  --from-literal=admin-password='<strong-random-password>' \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-## 8. Deploy manually with existing Docker Hub images
+`kube-prometheus-stack-values.yaml` contains values for the Kubernetes monitoring chart. The current profile targets a lab of approximately 4GB/50GB:
 
-If images already exist:
+- Grafana NodePort `30300`.
+- Prometheus NodePort `30900`.
+- One replica for Prometheus and Alertmanager.
+- Small retention and PVC settings to reduce resource usage.
+- Grafana persistence.
+
+Production requires separate values with appropriate HA, storage, and retention.
+
+Install the stack:
 
 ```bash
-export TAG='<existing-sha-or-tag>'
+helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  --create-namespace \
+  --values deployments/platform/monitoring/kube-prometheus-stack-values.yaml \
+  --wait --timeout 10m
+```
+
+Check Service names:
+
+```bash
+kubectl -n monitoring get pods,svc
+```
+
+For the release name `kube-prometheus-stack`, the monitoring Ingress points to:
+
+```text
+kube-prometheus-stack-grafana
+kube-prometheus-stack-prometheus
+```
+
+### Jaeger and OpenTelemetry Collector
+
+Apply the manifest:
+
+```bash
+kubectl apply -f deployments/platform/observability
+kubectl -n monitoring get pods,svc
+```
+
+Main Services:
+
+- `jaeger.monitoring.svc.cluster.local:16686`: internal Jaeger UI.
+- `jaeger.monitoring.svc.cluster.local:4317`: Jaeger OTLP gRPC.
+- `otel-collector.monitoring.svc.cluster.local:4317`: Collector OTLP gRPC.
+- `otel-collector.monitoring.svc.cluster.local:4318`: Collector OTLP HTTP.
+
+The Jaeger UI is exposed through the `jaeger-ui` Service at NodePort `30686`. The OpenTelemetry Collector does not need a NodePort; applications in the cluster send traces to the internal Service.
+
+### Kyverno
+
+Kyverno is a Kubernetes admission/policy controller and does not run in Docker Compose:
+
+```bash
+helm upgrade --install kyverno kyverno/kyverno \
+  --namespace security \
+  --create-namespace \
+  --wait --timeout 10m
+kubectl apply -f deployments/platform/security/kyverno-policies.yaml
+kubectl get clusterpolicy
+```
+
+Check `validationFailureAction` before changing policies from Audit to Enforce. The current policies mainly apply to staging/prod namespaces; expand the namespace match if enforcement is required for `nexuschat-lab`.
+
+## 7. Kafka UI and RedisInsight
+
+Kafka and Redis do not have integrated web dashboards. The following manifest deploys both UIs:
+
+```bash
+kubectl apply -f deployments/platform/dashboards/nodeport-dashboards.yaml
+kubectl -n kafka get deployment,svc kafka-ui
+kubectl -n redis-ui get deployment,svc redisinsight
+```
+
+NodePorts:
+
+| UI | Direct URL |
+|---|---|
+| Kafka UI | `http://<NODE_IP>:30080` |
+| RedisInsight | `http://<NODE_IP>:30540` |
+
+Kafka UI connects to `kafka.kafka.svc.cluster.local:9092` by default. RedisInsight requires a Redis connection to be entered in the interface if no connection profile is present.
+
+Dashboard NodePorts provide direct access to the node and do not pass through Traefik. Do not expose these ports to the Internet without firewall/VPN/authentication controls.
+
+## 8. Dashboard domains and Traefik
+
+Current app domain:
+
+```text
+http://nexuschat.click
+```
+
+This is Traefik Host routing for the app, not a NodePort. With DNS `nexuschat.click` pointing to the node IP, the following URLs can access NodePorts:
+
+```text
+http://nexuschat.click:30300   # Grafana
+http://nexuschat.click:30900   # Prometheus
+http://nexuschat.click:30686   # Jaeger
+http://nexuschat.click:30080   # Kafka UI
+http://nexuschat.click:30540   # RedisInsight
+```
+
+However, NodePorts bypass Traefik and do not automatically inherit the domain's TLS. The standard production approach is to create separate DNS records and Traefik Ingresses:
+
+```text
+grafana.nexuschat.click
+prometheus.nexuschat.click
+jaeger.nexuschat.click
+kafka.nexuschat.click
+redis.nexuschat.click
+```
+
+The existing dashboard manifests use `*.nexuschat.click` production/lab hosts; replace the DNS with real or private DNS records before applying them. NodePorts can be used directly without these Ingresses. To use host routing through Traefik:
+
+```bash
+kubectl apply -f deployments/platform/ingresses.yaml
+kubectl apply -f deployments/platform/monitoring/ingresses.yaml
+```
+
+The dashboard hosts are `grafana.nexuschat.click`, `prometheus.nexuschat.click`, `jaeger.nexuschat.click`, `kafka.nexuschat.click`, and `redis.nexuschat.click`. The manifests do not create DNS or TLS; the lab should continue using NodePort URLs if DNS/subdomains are not configured.
+
+## 9. Runtime secret
+
+Create the Secret before installing Helm. Do not commit a real password to the values or repository:
+
+```bash
+kubectl create secret generic nexuschat-runtime \
+  --namespace nexuschat-lab \
+  --from-literal=CHAT_JWT_SECRET='change-me' \
+  --from-literal=REDIS_PASSWORD="$REDIS_PASSWORD" \
+  --from-literal=CASSANDRA_USER='admin' \
+  --from-literal=CASSANDRA_PASSWORD='change-me' \
+  --from-literal=UPLOADER_S3_ACCESSKEY='change-me' \
+  --from-literal=UPLOADER_S3_SECRETKEY='change-me' \
+  --from-literal=USER_OAUTH_GOOGLE_CLIENTID='change-me' \
+  --from-literal=USER_OAUTH_GOOGLE_CLIENTSECRET='change-me' \
+  --from-literal=DATABASE_URL='postgresql+asyncpg://user:password@postgres.postgres.svc.cluster.local:5432/nexuschat_ai' \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Add AI/provider keys from `ai-service/README.md` if using AI. Rotate every credential that has ever been used in a local/dev file.
+
+## 10. Deploy the application
+
+Deploy manually with an immutable tag:
+
+```bash
+export TAG='<git-sha>'
 helm upgrade --install nexuschat deployments/helm/nexuschat \
   --namespace nexuschat-lab \
   --create-namespace \
@@ -439,20 +307,61 @@ helm upgrade --install nexuschat deployments/helm/nexuschat \
   --wait --timeout 10m
 ```
 
-If your `TAG` does not have proxy variant images, either push them first or remove/replace the two `services.*.image.fullname` overrides.
+Do not use `latest` for a release deployment. Proxy images must exist with the exact tag before overriding `web`/`uploader`.
 
-## 9. GitHub Actions deploy pipeline
+## 11. Verify
 
-Workflow file: `.github/workflows/devsecops-platform.yml`.
+```bash
+kubectl -n nexuschat-lab get pods,svc,ingress
+kubectl -n monitoring get pods,svc
+kubectl -n kafka get pods,svc
+kubectl -n redis-ui get pods,svc
+kubectl get ingressclass
 
-Triggers:
+for deploy in web chat match user uploader forwarder ai-service safety discovery workspace; do
+  kubectl -n nexuschat-lab rollout status deployment/$deploy --timeout=600s
+done
 
-- PR: validation only.
-- Push `main`: validation, image build/scan/SBOM/sign, proxy variant build, direct Helm deploy to `nexuschat-lab`.
-- Push `kafka` or tag `v*`: validation + image build/scan/SBOM/sign, no lab deploy unless branch is `main`.
-- Manual: `workflow_dispatch`.
+curl -i http://nexuschat.click
+curl -i http://nexuschat.click/api/ai/health
+```
 
-Required GitHub secrets:
+Check NodePorts:
+
+```bash
+curl -I http://<NODE_IP>:30300
+curl -I http://<NODE_IP>:30900
+curl -I http://<NODE_IP>:30686
+curl -I http://<NODE_IP>:30080
+curl -I http://<NODE_IP>:30540
+```
+
+Check traces/metrics:
+
+```bash
+kubectl -n monitoring logs deploy/otel-collector --tail=100
+kubectl -n monitoring logs deploy/jaeger --tail=100
+kubectl -n monitoring get svc jaeger jaeger-ui otel-collector
+```
+
+## 12. GitHub Actions CD
+
+Workflow `.github/workflows/devsecops-platform.yml` is the direct CD source of truth:
+
+- Pull Request: tests, lint, builds, Helm rendering, and security scans.
+- Push to `main`, `kafka`, or a `v*` tag: build images, blocking Trivy scans, SBOM generation, and Cosign signing.
+- Push to `main`: apply Jaeger/OTel and Kafka UI/RedisInsight manifests, then deploy the app with Helm into `nexuschat-lab`.
+- ArgoCD is not used.
+
+The workflow triggers on `workflow_dispatch`, `pull_request` to any branch, pushes to `main` or `kafka`, and `v*` tags. The Kubernetes deploy job runs only after a successful push to `main`, requires `build-images` and `build-proxy-variants` to pass, and requires a self-hosted runner with labels `[self-hosted, linux, x64, k3s-lab]`.
+
+The deploy runner must have these labels:
+
+```text
+[self-hosted, linux, x64, k3s-lab]
+```
+
+Minimum secrets:
 
 ```text
 DOCKER_USERNAME
@@ -460,147 +369,66 @@ DOCKER_PASSWORD
 KUBE_CONFIG_B64
 ```
 
-Optional but recommended if `turn.enabled=true` in the lab values:
+`KUBE_CONFIG_B64` must point to the correct cluster. Do not rely on an old self-hosted runner kubeconfig in production.
 
-```text
-CALL_TURN_SHAREDSECRET
-```
-
-If `CALL_TURN_SHAREDSECRET` is not configured as a GitHub secret, the deploy job generates a random value and patches only the `CALL_TURN_SHAREDSECRET` key into `nexuschat-runtime` before Helm runs. This prevents the `coturn` DaemonSet from getting stuck before the release finishes.
-
-`KUBE_CONFIG_B64` may be empty only if the self-hosted runner already has a working kubeconfig. Current job runs on:
-
-```text
-[self-hosted, linux, x64, k3s-lab]
-```
-
-To trigger deploy:
-
-```bash
-git status --short
-git add <reviewed-files>
-git commit -m "your message"
-git push origin main
-```
-
-## 10. Verify rollout
-
-```bash
-kubectl -n nexuschat-lab get pods -o wide
-kubectl -n nexuschat-lab get svc
-kubectl -n nexuschat-lab get ingress
-kubectl -n nexuschat-lab get deploy -o jsonpath='{range .items[*]}{.metadata.name}{" => "}{range .spec.template.spec.containers[*]}{.image}{" "}{end}{"\n"}{end}'
-
-for deploy in web chat match user uploader forwarder ai-service; do
-  kubectl -n nexuschat-lab rollout status deployment/$deploy --timeout=600s
-done
-
-curl -I http://IP
-curl -i http://IP/api/ai/health
-```
-
-Check logs:
-
-```bash
-kubectl -n nexuschat-lab logs deploy/web --tail=100
-kubectl -n nexuschat-lab logs deploy/chat --tail=100
-kubectl -n nexuschat-lab logs deploy/uploader --tail=100
-kubectl -n nexuschat-lab logs deploy/ai-service --tail=100
-```
-
-## 11. Common failures
-
-### Redis standalone error
-
-Symptom:
-
-```text
-ERR This instance has cluster support disabled
-```
-
-Fix: use Redis Cluster and ensure `REDIS_ADDRS` points at cluster node/headless endpoints.
-
-### Uploader `NoSuchBucket`
-
-Fix: create MinIO/S3 bucket `myfilebucket` and confirm uploader env `UPLOADER_S3_BUCKET` matches.
-
-### AI features fail with provider DNS/placeholder errors
-
-Inspect `nexuschat-runtime` keys `AI_ENDPOINT`, `AI_API_KEY`, `AI_MODEL`, `DATABASE_URL`. Restart only `ai-service` after secret update:
-
-```bash
-kubectl -n nexuschat-lab rollout restart deployment/ai-service
-kubectl -n nexuschat-lab rollout status deployment/ai-service --timeout=300s
-```
-
-### Ingress returns 503
-
-Check service endpoints and ingress class:
-
-```bash
-kubectl -n nexuschat-lab describe ingress
-kubectl -n nexuschat-lab get endpoints
-kubectl -n ingress-nginx logs deploy/ingress-nginx-controller --tail=100
-```
-
-## 12. Resource monitoring
-
-```bash
-kubectl top nodes || true
-kubectl top pods -A || true
-free -h
-df -h
-```
-
-Install metrics-server if needed:
-
-```bash
-kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
-kubectl patch deployment metrics-server -n kube-system --type=json -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
-```
+A `git pull` alone does not deploy; `git commit` followed by `git push` to `main` can trigger CD. The workflow does not automatically provision Kafka, Redis, Cassandra, MinIO, PostgreSQL, Traefik, kube-prometheus-stack, or Kyverno; those dependencies must be prepared separately and be Ready before CD.
 
 ## 13. Rollback and cleanup
-
-Rollback:
 
 ```bash
 helm history nexuschat -n nexuschat-lab
 helm rollback nexuschat <REVISION> -n nexuschat-lab
-for deploy in web chat match user uploader forwarder ai-service; do kubectl -n nexuschat-lab rollout status deployment/$deploy --timeout=600s; done
-```
-
-Cleanup app:
-
-```bash
 helm uninstall nexuschat -n nexuschat-lab
 ```
 
-Cleanup dependencies:
+Remove observability/dashboard resources separately if needed:
 
 ```bash
-helm uninstall redis -n redis || true
-kubectl delete statefulset,svc -n kafka -l app=kafka || true
-kubectl delete statefulset,svc -n cassandra -l app=cassandra || true
-kubectl delete deployment,svc -n minio -l app=minio || true
-helm uninstall ai-postgres -n postgres || true
+kubectl delete -f deployments/platform/dashboards/nodeport-dashboards.yaml
+kubectl delete -f deployments/platform/observability
+helm uninstall kube-prometheus-stack -n monitoring
 ```
 
-Remove K3s:
+Do not delete Cassandra, Redis, PostgreSQL, MinIO, or Kafka PVCs without confirming the backup.
+
+## 14. Troubleshooting
+
+### Ingress does not route
 
 ```bash
-sudo /usr/local/bin/k3s-uninstall.sh
+kubectl get ingressclass
+kubectl -n nexuschat-lab describe ingress
+kubectl -n kube-system get pods | grep -i traefik
 ```
 
-## 14. Final lab checklist
+Ensure `ingressClassName: traefik`, DNS points to the node IP, and the Service has endpoints.
 
-- [ ] K3s node Ready.
-- [ ] ingress-nginx pod Ready.
-- [ ] Redis Cluster, Kafka, Cassandra, MinIO, PostgreSQL Ready.
-- [ ] Cassandra schema applied.
-- [ ] MinIO bucket `myfilebucket` exists.
-- [ ] Secret `nexuschat-runtime` exists in `nexuschat-lab`.
-- [ ] Docker Hub images for selected tag exist.
-- [ ] Helm release `nexuschat` deployed with `values-lab-k3s.yaml`.
-- [ ] All 10 deployments rolled out.
-- [ ] `curl http://IP` responds.
-- [ ] `curl http://IP/api/ai/health` responds.
+### NodePort is unreachable
+
+```bash
+kubectl -n monitoring get svc
+kubectl -n kafka get svc kafka-ui
+kubectl -n redis-ui get svc redisinsight
+sudo ufw status
+```
+
+Open ports `30080`, `30300`, `30540`, `30686`, and `30900` in the lab network as required; do not expose them publicly without controls.
+
+### Redis connection error
+
+Verify that Redis is actually running as a Cluster and that the hostname in `values-lab-k3s.yaml` matches the Service/headless Service:
+
+```bash
+kubectl -n redis get pods,svc
+```
+
+### Kafka UI cannot see the broker
+
+Check the Service and advertised listener:
+
+```bash
+kubectl -n kafka get svc kafka
+kubectl -n kafka logs statefulset/kafka --tail=100
+```
+
+`KAFKA_ADVERTISED_LISTENERS` must advertise a hostname that Kafka UI and applications in the cluster can resolve.
