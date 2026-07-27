@@ -11,7 +11,7 @@ ARG VERSION
 RUN make dep
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-X github.com/Tuananh165-art/NexusChat/cmd.Version=$VERSION -w -s" -o server ./main.go
 
-FROM alpine:3.22
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates
 
 RUN mkdir -p /app
