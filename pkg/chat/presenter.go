@@ -8,19 +8,18 @@ import (
 )
 
 type MessagePresenter struct {
-	MessageID     string                 `json:"message_id"`
-	Event         int                    `json:"event"`
-	UserID        string                 `json:"user_id"`
-	Payload       string                 `json:"payload"`
-	Seen          bool                   `json:"seen"`
-	Time          int64                  `json:"time"`
-	EditedAt      int64                  `json:"edited_at,omitempty"`
-	DeletedForAll bool                   `json:"deleted_for_all,omitempty"`
-	DeletedBy     string                 `json:"deleted_by,omitempty"`
+	MessageID     string                     `json:"message_id"`
+	Event         int                        `json:"event"`
+	UserID        string                     `json:"user_id"`
+	Payload       string                     `json:"payload"`
+	Time          int64                      `json:"time"`
+	EditedAt      int64                      `json:"edited_at,omitempty"`
+	DeletedForAll bool                       `json:"deleted_for_all,omitempty"`
+	DeletedBy     string                     `json:"deleted_by,omitempty"`
 	Reactions     []ReactionSummaryPresenter `json:"reactions,omitempty"`
-	IsPinned      bool                   `json:"is_pinned,omitempty"`
-	ParentID      string                 `json:"parent_id,omitempty"`
-	ReplyPreview  *ReplyPreviewPresenter `json:"reply_preview,omitempty"`
+	IsPinned      bool                       `json:"is_pinned,omitempty"`
+	ParentID      string                     `json:"parent_id,omitempty"`
+	ReplyPreview  *ReplyPreviewPresenter     `json:"reply_preview,omitempty"`
 }
 
 type ReplyPreviewPresenter struct {
@@ -51,8 +50,9 @@ type UserIDsPresenter struct {
 }
 
 type MessagesPresenter struct {
-	NextPageState string             `json:"next_ps"`
-	Messages      []MessagePresenter `json:"messages"`
+	NextPageState     string             `json:"next_ps"`
+	LastReadMessageID string             `json:"last_read_message_id"`
+	Messages          []MessagePresenter `json:"messages"`
 }
 
 func (m *MessagePresenter) Encode() []byte {

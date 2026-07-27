@@ -196,7 +196,7 @@ func (s *Service) routes() *gin.Engine {
 	engine.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	engine.GET("/ready", s.ready)
 	group := engine.Group("/api/safety")
-	group.Use(realtime.RequireIdentity(s.cassandra))
+	group.Use(realtime.RequireIdentity(s.cassandra, realtime.RedisSessionValidator(s.redis)))
 	group.POST("/reports", s.createReport)
 	group.GET("/reports", s.listReports)
 	group.GET("/reports/:id", s.getReport)
@@ -214,12 +214,35 @@ func (s *Service) routes() *gin.Engine {
 	return engine
 }
 
+func (s *Service) isModerator(userID uint64) bool {
+	for _, raw := range strings.Split(os.Getenv("SAFETY_MODERATOR_USER_IDS"), ",") {
+		id, err := strconv.ParseUint(strings.TrimSpace(raw), 10, 64)
+		if err == nil && id != 0 && id == userID {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) requireModerator(c *gin.Context) bool {
+	if !s.isModerator(realtime.IdentityFrom(c).UserID) {
+		c.JSON(http.StatusForbidden, gin.H{"message": "moderator permission required"})
+		return false
+	}
+	return true
+}
+
 func (s *Service) ready(c *gin.Context) {
 	if err := s.redis.Ping(c.Request.Context()).Err(); err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "not_ready"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ready"})
+}
+
+func canAccessReport(identity realtime.Identity, report Report) bool {
+	return identity.ChannelID == report.ChannelID &&
+		(identity.UserID == report.ReporterID || identity.UserID == report.TargetUserID)
 }
 
 func (s *Service) createReport(c *gin.Context) {
@@ -256,15 +279,23 @@ func (s *Service) scanReport(ctx context.Context, id string) (Report, error) {
 }
 
 func (s *Service) getReport(c *gin.Context) {
+	identity := realtime.IdentityFrom(c)
 	report, err := s.scanReport(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"message": "report not found"})
+		return
+	}
+	if !s.isModerator(identity.UserID) && !canAccessReport(identity, report) {
+		c.JSON(http.StatusForbidden, gin.H{"message": "report access denied"})
 		return
 	}
 	c.JSON(http.StatusOK, report)
 }
 
 func (s *Service) listReports(c *gin.Context) {
+	if !s.requireModerator(c) {
+		return
+	}
 	status := c.DefaultQuery("status", "open")
 	iter := s.cassandra.Query("SELECT report_id, reporter_id, target_user_id, channel_id, message_id, reason, created_at FROM safety_reports_by_status WHERE status = ? LIMIT 100", status).WithContext(c.Request.Context()).Iter()
 	reports := make([]Report, 0)
@@ -279,6 +310,9 @@ func (s *Service) listReports(c *gin.Context) {
 }
 
 func (s *Service) updateReport(c *gin.Context) {
+	if !s.requireModerator(c) {
+		return
+	}
 	var request struct {
 		Status string `json:"status"`
 	}
@@ -300,6 +334,15 @@ func (s *Service) updateReport(c *gin.Context) {
 
 func (s *Service) createAppeal(c *gin.Context) {
 	identity := realtime.IdentityFrom(c)
+	report, err := s.scanReport(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"message": "report not found"})
+		return
+	}
+	if identity.UserID != report.TargetUserID || identity.ChannelID != report.ChannelID {
+		c.JSON(http.StatusForbidden, gin.H{"message": "appeal access denied"})
+		return
+	}
 	var request struct {
 		Reason string `json:"reason"`
 	}
@@ -380,6 +423,9 @@ func (s *Service) listRules(c *gin.Context) {
 }
 
 func (s *Service) createRule(c *gin.Context) {
+	if !s.requireModerator(c) {
+		return
+	}
 	var rule Rule
 	if c.ShouldBindJSON(&rule) != nil || rule.Name == "" || rule.Pattern == "" || rule.Score < 1 || rule.Score > 100 {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid rule"})
@@ -399,6 +445,9 @@ func (s *Service) createRule(c *gin.Context) {
 }
 
 func (s *Service) updateRule(c *gin.Context) {
+	if !s.requireModerator(c) {
+		return
+	}
 	var rule Rule
 	if c.ShouldBindJSON(&rule) != nil || rule.Name == "" || rule.Pattern == "" || rule.Score < 1 || rule.Score > 100 {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid rule"})
@@ -418,11 +467,17 @@ func (s *Service) updateRule(c *gin.Context) {
 }
 
 func (s *Service) deleteRule(c *gin.Context) {
+	if !s.requireModerator(c) {
+		return
+	}
 	_ = s.cassandra.Query("DELETE FROM safety_rules WHERE rule_id = ?", c.Param("id")).WithContext(c.Request.Context()).Exec()
 	c.Status(http.StatusNoContent)
 }
 
 func (s *Service) getRisk(c *gin.Context) {
+	if !s.requireModerator(c) {
+		return
+	}
 	id, err := strconv.ParseUint(c.Param("userId"), 10, 64)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid user"})
@@ -484,14 +539,6 @@ func (s *Service) grpcMethods() map[string]func(context.Context, *structpb.Struc
 				}
 			}
 			return structpb.NewStruct(map[string]any{"candidate_ids": allowed})
-		},
-		"GetUserRisk": func(ctx context.Context, req *structpb.Struct) (*structpb.Struct, error) {
-			id := uintField(req, "user_id")
-			score, _ := s.redis.Get(ctx, fmt.Sprintf("safety:risk:%d", id)).Int()
-			return structpb.NewStruct(map[string]any{"user_id": strconv.FormatUint(id, 10), "score": score})
-		},
-		"AuthorizeModerationAction": func(context.Context, *structpb.Struct) (*structpb.Struct, error) {
-			return structpb.NewStruct(map[string]any{"authorized": true})
 		},
 	}
 }

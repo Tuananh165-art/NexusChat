@@ -2,10 +2,12 @@ package realtime
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -17,21 +19,34 @@ func StructBool(value *structpb.Struct, field string) bool {
 	return entry != nil && entry.GetBoolValue()
 }
 
-func CallStructRPC(ctx context.Context, endpoint, service, method string, fields map[string]any) (*structpb.Struct, error) {
+func CallStructRPC(ctx context.Context, endpoint, callerService, service, method string, fields map[string]any) (*structpb.Struct, error) {
 	if endpoint == "" {
 		return nil, nil
 	}
-	callCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	conn, err := grpc.DialContext(callCtx, endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
-	if err != nil {
-		return nil, err
+	secret := os.Getenv("NEXUSCHAT_GRPC_SHARED_SECRET")
+	if secret == "" {
+		return nil, fmt.Errorf("internal grpc authentication is not configured")
 	}
-	defer conn.Close()
 	request, err := structpb.NewStruct(fields)
 	if err != nil {
 		return nil, err
 	}
+	callCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	callCtx = metadata.AppendToOutgoingContext(callCtx,
+		"authorization", "Bearer "+secret,
+		"service-id", callerService,
+	)
+	callCtx, err = StructAssertionMetadata(callCtx, service, method, request)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	defer cancel()
+	conn, err := grpc.DialContext(callCtx, endpoint, grpc.WithTransportCredentials(MustClientTransportCredentials()), grpc.WithBlock())
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
 	response := &structpb.Struct{}
 	if err := conn.Invoke(callCtx, "/"+service+"/"+method, request, response); err != nil {
 		return nil, err

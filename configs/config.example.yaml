@@ -71,6 +71,14 @@ workspace:
         endpoint: "localhost:4000"
   workers: 4
   reminderPollSecond: 15
+notification:
+  pollIntervalSecond: 2
+  leaseSecond: 30
+  maxAttempts: 8
+  baseRetrySecond: 1
+  maxRetrySecond: 900
+  batchSize: 50
+  workerID: ""
 match:
   http:
     server:
@@ -117,7 +125,10 @@ user:
     cookie:
       maxAge: 3600
       path: "/"
-      domain: "localhost"
+      domain: ""
+      secure: false
+      httpOnly: true
+      sameSite: "lax"
     google:
       redirectUrl: "http://localhost/api/user/oauth2/google/callback"
       clientId: ""
@@ -127,7 +138,10 @@ user:
     cookie:
       maxAge: 86400
       path: "/"
-      domain: "localhost"
+      domain: ""
+      secure: false
+      httpOnly: true
+      sameSite: "lax"
 kafka:
   addrs: kafka-0:9092,kafka-1:9092,kafka-2:9092
   version: "3.0.1"

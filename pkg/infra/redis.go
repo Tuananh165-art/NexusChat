@@ -26,17 +26,23 @@ var (
 type RedisCache interface {
 	Get(ctx context.Context, key string, dst interface{}) (bool, error)
 	Set(ctx context.Context, key string, val interface{}) error
+	SetPersistent(ctx context.Context, key string, val interface{}) error
+	SetNX(ctx context.Context, key string, val interface{}) (bool, error)
 	Delete(ctx context.Context, key string) error
 	HGet(ctx context.Context, key, field string, dst interface{}) (bool, error)
 	HMGet(ctx context.Context, key string, fields []string) ([]interface{}, error)
 	HGetAll(ctx context.Context, key string) (map[string]string, error)
 	HSet(ctx context.Context, key string, values ...interface{}) error
+	HIncrBy(ctx context.Context, key, field string, delta int64) (int64, error)
 	HDel(ctx context.Context, key, field string) error
 	RPush(ctx context.Context, key string, val interface{}) error
 	LRange(ctx context.Context, key string, start, stop int64) ([]string, error)
 	Publish(ctx context.Context, topic string, payload interface{}) error
 	ZPopMinOrAddOne(ctx context.Context, key string, score float64, member interface{}) (bool, string, error)
 	ZRemOne(ctx context.Context, key string, member interface{}) error
+	ZAdd(ctx context.Context, key string, score float64, member string) error
+	ZRem(ctx context.Context, key, member string) error
+	ZRangeByLex(ctx context.Context, key, min, max string, limit int) ([]string, error)
 	HGetIfKeyExists(ctx context.Context, key, field string, dst interface{}) (bool, bool, error)
 	ExecPipeLine(ctx context.Context, cmds *[]RedisCmd) error
 }
@@ -149,6 +155,17 @@ func (rc *RedisCacheImpl) Set(ctx context.Context, key string, val interface{}) 
 	return nil
 }
 
+// SetPersistent stores a value without the cache expiration. Account identity and
+// credential records must not disappear when the general cache TTL elapses.
+func (rc *RedisCacheImpl) SetPersistent(ctx context.Context, key string, val interface{}) error {
+	return rc.client.Set(ctx, key, val, 0).Err()
+}
+
+// SetNX atomically claims a key when it does not already exist.
+func (rc *RedisCacheImpl) SetNX(ctx context.Context, key string, val interface{}) (bool, error) {
+	return rc.client.SetNX(ctx, key, val, 0).Result()
+}
+
 // Delete deletes a key
 func (rc *RedisCacheImpl) Delete(ctx context.Context, key string) error {
 	if err := rc.client.Del(ctx, key).Err(); err != nil {
@@ -181,6 +198,10 @@ func (rc *RedisCacheImpl) HGetAll(ctx context.Context, key string) (map[string]s
 
 func (rc *RedisCacheImpl) HSet(ctx context.Context, key string, values ...interface{}) error {
 	return rc.client.HSet(ctx, key, values).Err()
+}
+
+func (rc *RedisCacheImpl) HIncrBy(ctx context.Context, key, field string, delta int64) (int64, error) {
+	return rc.client.HIncrBy(ctx, key, field, delta).Result()
 }
 
 func (rc *RedisCacheImpl) HDel(ctx context.Context, key, field string) error {
@@ -228,6 +249,18 @@ func (rc *RedisCacheImpl) ZPopMinOrAddOne(ctx context.Context, key string, score
 }
 func (rc *RedisCacheImpl) ZRemOne(ctx context.Context, key string, member interface{}) error {
 	return rc.client.ZRem(ctx, key, member).Err()
+}
+
+func (rc *RedisCacheImpl) ZAdd(ctx context.Context, key string, score float64, member string) error {
+	return rc.client.ZAdd(ctx, key, redis.Z{Score: score, Member: member}).Err()
+}
+
+func (rc *RedisCacheImpl) ZRem(ctx context.Context, key, member string) error {
+	return rc.client.ZRem(ctx, key, member).Err()
+}
+
+func (rc *RedisCacheImpl) ZRangeByLex(ctx context.Context, key, min, max string, limit int) ([]string, error) {
+	return rc.client.ZRangeByLex(ctx, key, &redis.ZRangeBy{Min: min, Max: max, Offset: 0, Count: int64(limit)}).Result()
 }
 
 var hgetIfKeyExists = redis.NewScript(`

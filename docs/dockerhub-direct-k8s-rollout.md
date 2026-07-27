@@ -20,7 +20,7 @@ docker.io/tuananh165/nexuschat-api:proxy-upload-<git-sha>
 docker.io/tuananh165/nexuschat-web:proxy-upload-v2-<git-sha>
 ```
 
-Images are built locally on the runner, undergo a blocking Trivy scan, have an SBOM generated, and are then pushed and signed with Cosign. Do not use mutable `latest` for a release deployment.
+On pushes to `main`, the six primary images also receive the `latest` alias for Compose/lab convenience. Release deployments still use immutable Git SHA tags; do not use `latest` for production.
 
 ## Helm values
 
@@ -102,6 +102,10 @@ Jaeger      : http://<NODE_IP>:30686
 
 NodePorts bypass Traefik. `nexuschat.click:<port>` works only if the domain resolves to the node IP and the firewall permits the port. It does not provide TLS automatically; production should use Traefik Ingress with subdomains and TLS.
 
+## Cassandra schema during CD
+
+The application Helm chart runs a pre-install/pre-upgrade Cassandra Job. It embeds `001_baseline.cql` followed by the versioned `002`–`010` migrations and records each successful file in `NexusChat.schema_migrations`. Migration `010_drop_messages_seen.cql` removes the obsolete per-message flag after old binaries are retired. A Git push must not run `cassandra/init.cql` manually on the server after the Helm Job is enabled. `init.cql` remains useful for standalone bootstrap and Compose; the migration files are required for upgrades and must be kept in source control.
+
 ## CI/CD
 
 - Pull Request: tests, lint, builds, Helm rendering, and security scans.
@@ -109,7 +113,7 @@ NodePorts bypass Traefik. `nexuschat.click:<port>` works only if the domain reso
 - Push to `main`: deploy Jaeger/OTel and dashboard manifests, then directly deploy the app to the lab with Helm.
 - ArgoCD is not used.
 
-The workflow triggers on `workflow_dispatch`, `pull_request` to any branch, pushes to `main` or `kafka`, and `v*` tags. The Kubernetes deploy job runs only after a successful push to `main`, requires `build-images` and `build-proxy-variants` to pass, and requires a self-hosted runner with labels `[self-hosted, linux, x64, k3s-lab]`.
+The workflow triggers on `workflow_dispatch`, `pull_request` to any branch, pushes to `main` or `kafka`, and `v*` tags. The Kubernetes deploy job runs after the required image jobs succeed for either a push to `main` or a manual `workflow_dispatch`; it requires `build-images` and `build-proxy-variants` to pass, plus a self-hosted runner with labels `[self-hosted, linux, x64, k3s-lab]`.
 
 CD runs on a self-hosted runner with these labels:
 
@@ -122,7 +126,7 @@ A `git pull` alone does not deploy; `git commit` followed by `git push` to `main
 ## Rollout/rollback
 
 ```bash
-for deploy in web chat match user uploader forwarder ai-service safety discovery workspace; do
+for deploy in web chat match user uploader forwarder ai-service safety discovery workspace notification; do
   kubectl -n nexuschat-lab rollout status deployment/$deploy --timeout=600s
 done
 

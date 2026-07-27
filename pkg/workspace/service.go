@@ -122,7 +122,7 @@ func (s *Service) saveItem(ctx context.Context, item Item) error {
 	if err := realtime.PublishDurably(ctx, s.cassandra, s.events, "workspace", realtime.WorkspaceEventsTopic, event); err != nil {
 		return err
 	}
-	s.hub.Broadcast(gin.H{"type": eventType, "data": item})
+	s.hub.BroadcastToChannel(item.ChannelID, gin.H{"type": eventType, "data": item})
 	return nil
 }
 
@@ -147,7 +147,7 @@ func (s *Service) routes() *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
 	group := engine.Group("/api/workspace")
-	group.Use(realtime.RequireIdentity(s.cassandra))
+	group.Use(realtime.RequireIdentity(s.cassandra, realtime.RedisSessionValidator(s.redis)))
 	group.GET("/items", s.listItems)
 	group.POST("/items", s.createItem)
 	group.GET("/items/:id", s.getItemAPI)
@@ -201,11 +201,15 @@ func (s *Service) createItem(c *gin.Context) {
 		return
 	}
 	item.ChannelID, item.OwnerID = identity.ChannelID, identity.UserID
-	if value := c.Query("channel_id"); value != "" {
-		if parsed, err := strconv.ParseUint(value, 10, 64); err == nil {
-			item.ChannelID = parsed
-		}
+	// Generate the identifier before saving so the response and follow-up API
+	// calls expose the same durable item identity. saveItem also accepts a value
+	// because update paths intentionally persist a complete snapshot.
+	if item.ID == "" {
+		item.ID = uuid.NewString()
+		item.CreatedAt = time.Now().UTC()
 	}
+	// The channel in the signed token is authoritative. Never allow a client
+	// supplied query/body value to redirect a write into another channel.
 	if err := s.saveItem(c.Request.Context(), item); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 		return
@@ -214,8 +218,9 @@ func (s *Service) createItem(c *gin.Context) {
 }
 
 func (s *Service) getItemAPI(c *gin.Context) {
+	identity := realtime.IdentityFrom(c)
 	item, err := s.getItem(c.Request.Context(), c.Param("id"))
-	if err != nil {
+	if err != nil || item.ChannelID != identity.ChannelID {
 		c.JSON(http.StatusNotFound, gin.H{"message": "item not found"})
 		return
 	}
@@ -225,7 +230,7 @@ func (s *Service) getItemAPI(c *gin.Context) {
 func (s *Service) updateItem(c *gin.Context) {
 	identity := realtime.IdentityFrom(c)
 	item, err := s.getItem(c.Request.Context(), c.Param("id"))
-	if err != nil || item.OwnerID != identity.UserID {
+	if err != nil || item.ChannelID != identity.ChannelID || item.OwnerID != identity.UserID {
 		c.JSON(http.StatusNotFound, gin.H{"message": "item not found"})
 		return
 	}
@@ -266,7 +271,7 @@ func (s *Service) updateItem(c *gin.Context) {
 func (s *Service) deleteItem(c *gin.Context) {
 	identity := realtime.IdentityFrom(c)
 	item, err := s.getItem(c.Request.Context(), c.Param("id"))
-	if err != nil || item.OwnerID != identity.UserID {
+	if err != nil || item.ChannelID != identity.ChannelID || item.OwnerID != identity.UserID {
 		c.Status(http.StatusNotFound)
 		return
 	}
@@ -275,7 +280,7 @@ func (s *Service) deleteItem(c *gin.Context) {
 	_ = s.redis.Del(c.Request.Context(), "workspace:item:"+item.ID).Err()
 	event, _ := realtime.NewEvent("workspace.item.deleted", "workspace-service", item.ID, item)
 	_ = realtime.PublishDurably(c.Request.Context(), s.cassandra, s.events, "workspace", realtime.WorkspaceEventsTopic, event)
-	s.hub.Broadcast(gin.H{"type": "workspace.item.deleted", "data": item})
+	s.hub.BroadcastToChannel(item.ChannelID, gin.H{"type": "workspace.item.deleted", "data": item})
 	c.Status(http.StatusNoContent)
 }
 
@@ -287,9 +292,9 @@ func (s *Service) updateStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid status"})
 		return
 	}
-	c.Request = c.Request.WithContext(c.Request.Context())
+	identity := realtime.IdentityFrom(c)
 	item, err := s.getItem(c.Request.Context(), c.Param("id"))
-	if err != nil || item.OwnerID != realtime.IdentityFrom(c).UserID {
+	if err != nil || item.ChannelID != identity.ChannelID || item.OwnerID != identity.UserID {
 		c.Status(http.StatusNotFound)
 		return
 	}
@@ -309,8 +314,9 @@ func (s *Service) updateAssignees(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid assignees"})
 		return
 	}
+	identity := realtime.IdentityFrom(c)
 	item, err := s.getItem(c.Request.Context(), c.Param("id"))
-	if err != nil || item.OwnerID != realtime.IdentityFrom(c).UserID {
+	if err != nil || item.ChannelID != identity.ChannelID || item.OwnerID != identity.UserID {
 		c.Status(http.StatusNotFound)
 		return
 	}
@@ -386,8 +392,9 @@ func (s *Service) createChecklist(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "text is required"})
 		return
 	}
+	identity := realtime.IdentityFrom(c)
 	item, err := s.getItem(c.Request.Context(), c.Param("id"))
-	if err != nil || item.OwnerID != realtime.IdentityFrom(c).UserID {
+	if err != nil || item.ChannelID != identity.ChannelID || item.OwnerID != identity.UserID {
 		c.JSON(http.StatusNotFound, gin.H{"message": "item not found"})
 		return
 	}
@@ -408,8 +415,9 @@ func (s *Service) updateChecklist(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "invalid checklist"})
 		return
 	}
+	identity := realtime.IdentityFrom(c)
 	item, err := s.getItem(c.Request.Context(), c.Param("id"))
-	if err != nil || item.OwnerID != realtime.IdentityFrom(c).UserID {
+	if err != nil || item.ChannelID != identity.ChannelID || item.OwnerID != identity.UserID {
 		c.JSON(http.StatusNotFound, gin.H{"message": "item not found"})
 		return
 	}
@@ -431,8 +439,9 @@ func (s *Service) updateChecklist(c *gin.Context) {
 }
 
 func (s *Service) deleteChecklist(c *gin.Context) {
+	identity := realtime.IdentityFrom(c)
 	item, err := s.getItem(c.Request.Context(), c.Param("id"))
-	if err != nil || item.OwnerID != realtime.IdentityFrom(c).UserID {
+	if err != nil || item.ChannelID != identity.ChannelID || item.OwnerID != identity.UserID {
 		c.Status(http.StatusNotFound)
 		return
 	}
@@ -443,17 +452,29 @@ func (s *Service) deleteChecklist(c *gin.Context) {
 func (s *Service) dueReminders(c *gin.Context) {
 	identity := realtime.IdentityFrom(c)
 	now := float64(time.Now().UTC().Unix())
-	values, _ := s.redis.ZRangeByScore(c.Request.Context(), "workspace:reminders", &redis.ZRangeBy{Min: "-inf", Max: fmt.Sprintf("%f", now), Offset: 0, Count: 100}).Result()
+	values, _ := s.redis.ZRangeByScore(c.Request.Context(), fmt.Sprintf("workspace:reminders:%d", identity.UserID), &redis.ZRangeBy{Min: "-inf", Max: fmt.Sprintf("%f", now), Offset: 0, Count: 100}).Result()
 	c.JSON(http.StatusOK, gin.H{"user_id": strconv.FormatUint(identity.UserID, 10), "reminders": values})
 }
 
 func (s *Service) websocket(c *gin.Context) {
 	identity := realtime.IdentityFrom(c)
-	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	protocol := ""
+	for _, value := range strings.Split(c.GetHeader("Sec-WebSocket-Protocol"), ",") {
+		value = strings.TrimSpace(value)
+		if strings.HasPrefix(value, "nexuschat-channel.") {
+			protocol = value
+			break
+		}
+	}
+	localUpgrader := upgrader
+	if protocol != "" {
+		localUpgrader.Subprotocols = []string{protocol}
+	}
+	conn, err := localUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		return
 	}
-	client := &realtime.Client{UserID: identity.UserID, Device: "workspace", Conn: conn, Send: make(chan []byte, 64)}
+	client := &realtime.Client{UserID: identity.UserID, ChannelID: identity.ChannelID, Device: "workspace", Conn: conn, Send: make(chan []byte, 64)}
 	s.hub.Add(client)
 	done := make(chan struct{})
 	go func() {
@@ -489,12 +510,43 @@ func uintField(req *structpb.Struct, name string) uint64 {
 	return uint64(value.GetNumberValue())
 }
 
+func (s *Service) isChannelMember(ctx context.Context, channelID, userID uint64) (bool, error) {
+	if channelID == 0 || userID == 0 {
+		return false, nil
+	}
+	var member uint64
+	err := s.cassandra.Query("SELECT user_id FROM channels WHERE id = ? AND user_id = ? LIMIT 1", channelID, userID).WithContext(ctx).Scan(&member)
+	if errors.Is(err, gocql.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return member == userID, nil
+}
+
+func (s *Service) grpcItemAccess(ctx context.Context, req *structpb.Struct, item Item) (bool, error) {
+	channelID, userID := uintField(req, "channel_id"), uintField(req, "user_id")
+	if channelID == 0 || userID == 0 || item.ChannelID != channelID {
+		return false, nil
+	}
+	member, err := s.isChannelMember(ctx, channelID, userID)
+	if err != nil || !member {
+		return false, err
+	}
+	return item.OwnerID == userID || contains(item.Assignees, userID), nil
+}
+
 func (s *Service) grpcMethods() map[string]func(context.Context, *structpb.Struct) (*structpb.Struct, error) {
 	return map[string]func(context.Context, *structpb.Struct) (*structpb.Struct, error){
 		"GetWorkspaceItem": func(ctx context.Context, req *structpb.Struct) (*structpb.Struct, error) {
 			item, err := s.getItem(ctx, req.GetFields()["item_id"].GetStringValue())
 			if err != nil {
 				return nil, err
+			}
+			authorized, err := s.grpcItemAccess(ctx, req, item)
+			if err != nil || !authorized {
+				return nil, fmt.Errorf("workspace item access denied")
 			}
 			body, _ := json.Marshal(item)
 			var value map[string]any
@@ -505,17 +557,33 @@ func (s *Service) grpcMethods() map[string]func(context.Context, *structpb.Struc
 			items := make([]any, 0)
 			for _, id := range strings.Split(req.GetFields()["item_ids"].GetStringValue(), ",") {
 				item, err := s.getItem(ctx, strings.TrimSpace(id))
-				if err == nil {
-					body, _ := json.Marshal(item)
-					var value map[string]any
-					_ = json.Unmarshal(body, &value)
-					items = append(items, value)
+				if err != nil {
+					continue
 				}
+				authorized, accessErr := s.grpcItemAccess(ctx, req, item)
+				if accessErr != nil {
+					return nil, accessErr
+				}
+				if !authorized {
+					continue
+				}
+				body, _ := json.Marshal(item)
+				var value map[string]any
+				_ = json.Unmarshal(body, &value)
+				items = append(items, value)
 			}
 			return structpb.NewStruct(map[string]any{"items": items})
 		},
 		"CreateItemFromMessage": func(ctx context.Context, req *structpb.Struct) (*structpb.Struct, error) {
-			item := Item{ChannelID: uintField(req, "channel_id"), OwnerID: uintField(req, "user_id"), MessageID: uintField(req, "message_id"), Kind: "bookmark", Title: "Saved message", Content: req.GetFields()["content"].GetStringValue()}
+			channelID, userID := uintField(req, "channel_id"), uintField(req, "user_id")
+			member, err := s.isChannelMember(ctx, channelID, userID)
+			if err != nil {
+				return nil, err
+			}
+			if !member {
+				return nil, fmt.Errorf("workspace channel access denied")
+			}
+			item := Item{ChannelID: channelID, OwnerID: userID, MessageID: uintField(req, "message_id"), Kind: "bookmark", Title: "Saved message", Content: req.GetFields()["content"].GetStringValue()}
 			if err := s.saveItem(ctx, item); err != nil {
 				return nil, err
 			}
@@ -526,11 +594,11 @@ func (s *Service) grpcMethods() map[string]func(context.Context, *structpb.Struc
 			if err != nil {
 				return nil, err
 			}
-			userID := uintField(req, "user_id")
-			return structpb.NewStruct(map[string]any{"authorized": item.OwnerID == userID || contains(item.Assignees, userID)})
-		},
-		"ArchiveChannelWorkspace": func(ctx context.Context, req *structpb.Struct) (*structpb.Struct, error) {
-			return structpb.NewStruct(map[string]any{"archived": true, "channel_id": strconv.FormatUint(uintField(req, "channel_id"), 10)})
+			authorized, err := s.grpcItemAccess(ctx, req, item)
+			if err != nil {
+				return nil, err
+			}
+			return structpb.NewStruct(map[string]any{"authorized": authorized})
 		},
 	}
 }

@@ -8,8 +8,10 @@ metadata:
     "helm.sh/hook-weight": "-10"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 data:
-  002_replace_realtime_services.cql: |
-{{ .Files.Get "migrations/002_replace_realtime_services.cql" | indent 4 }}
+{{- range $path, $_ := .Files.Glob "migrations/*.cql" }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
 ---
 apiVersion: batch/v1
 kind: Job
@@ -36,7 +38,15 @@ spec:
             - -ec
             - |
               until cqlsh "$CASSANDRA_HOST" "$CASSANDRA_PORT" -e "DESCRIBE KEYSPACES"; do sleep 5; done
-              cqlsh "$CASSANDRA_HOST" "$CASSANDRA_PORT" -f /migrations/002_replace_realtime_services.cql
+              cqlsh "$CASSANDRA_HOST" "$CASSANDRA_PORT" -e "CREATE KEYSPACE IF NOT EXISTS \"NexusChat\" WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}; USE \"NexusChat\"; CREATE TABLE IF NOT EXISTS schema_migrations (migration_id text PRIMARY KEY, applied_at timestamp);"
+              for migration in /migrations/*.cql; do
+                migration_id=$(basename "$migration" .cql)
+                if cqlsh "$CASSANDRA_HOST" "$CASSANDRA_PORT" -e "SELECT migration_id FROM \\\"NexusChat\\\".schema_migrations WHERE migration_id = '$migration_id';" | grep -q "$migration_id"; then continue; fi
+                if ! cqlsh "$CASSANDRA_HOST" "$CASSANDRA_PORT" -f "$migration"; then
+                  if [ "$migration_id" != "004_group_room_avatar" ]; then exit 1; fi
+                fi
+                cqlsh "$CASSANDRA_HOST" "$CASSANDRA_PORT" -e "INSERT INTO \\\"NexusChat\\\".schema_migrations (migration_id, applied_at) VALUES ('$migration_id', dateOf(now()));"
+              done
           env:
             - name: CASSANDRA_HOST
               value: {{ .Values.migration.cassandraHost | quote }}

@@ -1,6 +1,6 @@
 # NexusChat
 
-NexusChat is a Go/Next.js real-time chat platform for anonymous matching. It includes Go services, a Next.js frontend served by `web`, and the FastAPI `ai-service`. The current lab runtime uses HTTP and WebSocket (`ws://`) through Traefik; TLS is not enabled.
+NexusChat is a Go/Next.js real-time chat platform for anonymous matching. It includes Go services, a Next.js frontend served by `web`, and the FastAPI `ai-service`. The current lab runtime uses HTTP and WebSocket (`ws://`) through Traefik; TLS is not enabled. See the complete [project reference](docs/project-reference.md) for business workflows, service boundaries, feature/API inventory, migration policy, and known limitations.
 
 ## Architecture
 
@@ -16,6 +16,8 @@ Traefik
   │            └── workspace
   └── ai-service ── PostgreSQL
 
+Notification intents ── Cassandra outbox ── notification worker
+
 Go services ── Kafka + Redis Cluster + Cassandra
 Traces ── OpenTelemetry Collector ── Jaeger
 Metrics ── Prometheus ── Grafana
@@ -29,6 +31,7 @@ Metrics ── Prometheus ── Grafana
 | chat | `server chat` / `nexuschat-api` | Chat, channels, and broadcasting |
 | match | `server match` / `nexuschat-api` | Matching and waitlist |
 | user | `server user` / `nexuschat-api` | Users, OAuth, and sessions |
+| notification | `server notification` / `nexuschat-api` | Durable notification outbox/retry worker |
 | uploader | `server uploader` / `nexuschat-api` | File uploads through MinIO |
 | forwarder | `server forwarder` / `nexuschat-api` | Kafka fanout/routing |
 | safety | `server safety` / `nexuschat-safety` | Moderation, reporting, blocking, and risk scoring |
@@ -61,8 +64,9 @@ Workspace:
 - `GET/PUT/DELETE /api/workspace/items/{id}`
 - `PUT /api/workspace/items/{id}/status`
 - `PUT /api/workspace/items/{id}/assignees`
-- `GET/POST /api/workspace/boards/{channelId}`
-- `GET/POST/DELETE /api/workspace/bookmarks`
+- `POST/PUT/DELETE /api/workspace/items/{id}/checklist...`
+- `GET /api/workspace/boards/{channelId}`
+- `GET /api/workspace/bookmarks`
 - `POST/PUT/DELETE /api/workspace/collections`
 - `GET /api/workspace/reminders/due`
 - `GET /api/workspace/ws`
@@ -78,7 +82,7 @@ docker compose up --build -d
 docker compose ps
 ```
 
-Compose starts the app, Traefik, AI PostgreSQL, Redis Cluster, MinIO, Kafka, Cassandra, Prometheus, Grafana, Jaeger, and the OpenTelemetry Collector. `createbucket` and `cassandra-init` are one-shot jobs that exit normally after completing.
+Compose starts the app, Traefik, AI PostgreSQL, Redis Cluster, MinIO, Kafka, Cassandra, Prometheus, Grafana, Jaeger, and the OpenTelemetry Collector. `createbucket` and `cassandra-init` are one-shot jobs: they complete successfully and may be rerun; bucket creation is idempotent.
 
 Local URLs:
 
@@ -99,9 +103,12 @@ Compose observability configuration:
 
 Docker Compose uses host ports, **not Kubernetes NodePorts**. Kafka/Redis do not have an integrated web dashboard in Compose.
 
-## Database and events
+## Database, migrations, and events
 
-- Cassandra stores messages/channels, safety decisions, discovery profiles, and workspace data.
+Cassandra has two related but different inputs. `cassandra/init.cql` is an idempotent standalone/bootstrap schema. The versioned files under `cassandra/migrations/` are the upgrade ledger and must not be ignored. Compose runs `init.cql` and then every unapplied migration in lexical order. Helm runs the pre-install/pre-upgrade migration Job with the chart-embedded `001_baseline.cql` through `010_*.cql`; migration `010_drop_messages_seen.cql` removes the obsolete per-message flag after old binaries are retired. When the Job succeeds, do not manually apply `init.cql` or individual migrations. Back up production data before upgrades.
+
+
+Cassandra stores messages/channels, safety decisions, discovery profiles, workspace data, notification intents, and delivered notifications. The `notification` process claims leased intents, retries delivery with exponential backoff, and marks exhausted intents as dead-letter (`dead`). User-facing notification creation only enqueues an intent; the worker performs the durable write asynchronously.
 - Redis Cluster provides caching, rate limiting, locking, waitlists, reminder leases, and deduplication.
 - Kafka uses the topics `nexuschat.chat.events.v1`, `nexuschat.safety.events.v1`, `nexuschat.discovery.events.v1`, and `nexuschat.workspace.events.v1`.
 - PostgreSQL is used by the AI service/Alembic.
@@ -221,7 +228,7 @@ kubectl -n monitoring get pods,svc
 kubectl -n kafka get pods,svc
 kubectl -n redis-ui get pods,svc
 
-for deploy in web chat match user uploader forwarder ai-service safety discovery workspace; do
+for deploy in web chat match user notification uploader forwarder ai-service safety discovery workspace; do
   kubectl -n nexuschat-lab rollout status deployment/$deploy --timeout=600s
 done
 ```
@@ -230,7 +237,18 @@ App:
 
 ```bash
 curl -i http://nexuschat.click
-curl -i http://nexuschat.click/api/ai/health
+```
+
+The lab disables the public AI ingress. To check AI health, forward the internal Service in one terminal:
+
+```bash
+kubectl -n nexuschat-lab port-forward svc/ai-service 18090:8090
+```
+
+Then, in a second terminal:
+
+```bash
+curl -i http://127.0.0.1:18090/health
 ```
 
 Dashboard:
@@ -247,13 +265,12 @@ curl -I http://<NODE_IP>:30540
 
 Workflow source of truth: `.github/workflows/devsecops-platform.yml`.
 
-The workflow triggers on `workflow_dispatch`, `pull_request` to any branch, pushes to `main` or `kafka`, and `v*` tags. The Kubernetes deploy job runs only after a successful push to `main`, requires `build-images` and `build-proxy-variants` to pass, and requires a self-hosted runner with labels `[self-hosted, linux, x64, k3s-lab]`.
+The workflow triggers on `workflow_dispatch`, `pull_request` to any branch, pushes to `main` or `kafka`, and `v*` tags. The Kubernetes deploy job runs after the required image jobs succeed for either a push to `main` or a manual `workflow_dispatch`; it requires `build-images` and `build-proxy-variants` to pass, plus a self-hosted runner with labels `[self-hosted, linux, x64, k3s-lab]`.
 
 - Pull Request: Go tests/race tests, frontend lint/build, AI lint/tests, Helm render, Gitleaks, Dependency Review, CodeQL, and Trivy filesystem scanning.
 - Push to `main`, `kafka`, or a `v*` tag: build images, perform blocking Trivy scans for HIGH/CRITICAL findings, generate SPDX SBOMs, and use Cosign.
 - Proxy variants are also scanned, included in SBOMs, and signed; they are pushed only after the security gate passes.
 - Push to `main`: apply Jaeger/OTel and dashboard manifests, then perform a direct Helm deployment of the app to the K3s lab.
-- ArgoCD is not used.
 
 CI/CD does not automatically provision Kafka, Redis, Cassandra, MinIO, PostgreSQL, Traefik, kube-prometheus-stack, or Kyverno. These dependencies must be Ready before CD. A `git pull` alone does not deploy; `git commit` followed by `git push` to `main` can trigger CD.
 
@@ -267,6 +284,7 @@ go run . match
 go run . safety
 go run . discovery
 go run . workspace
+go run . notification
 ```
 
 Frontend:

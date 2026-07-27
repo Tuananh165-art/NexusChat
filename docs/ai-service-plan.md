@@ -112,7 +112,10 @@ Kubernetes checks:
 ```bash
 kubectl -n nexuschat-lab logs deploy/ai-service --tail=100
 kubectl -n nexuschat-lab exec deploy/ai-service -- env | grep -E 'AI_|DATABASE_URL|REDIS_URL'
-curl -i http://IP/api/ai/health
+# The lab disables the public AI ingress. In one terminal:
+kubectl -n nexuschat-lab port-forward svc/ai-service 18090:8090
+# In a second terminal:
+curl -i http://127.0.0.1:18090/health
 ```
 
 ## 8. Roadmap

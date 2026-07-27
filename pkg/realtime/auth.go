@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	"github.com/Tuananh165-art/NexusChat/pkg/common"
 	"github.com/gin-gonic/gin"
 	"github.com/gocql/gocql"
+	"github.com/redis/go-redis/v9"
 )
 
 type Identity struct {
@@ -16,18 +18,65 @@ type Identity struct {
 	ChannelID uint64
 }
 
-func Authenticate(c *gin.Context, session *gocql.Session) (Identity, error) {
-	userValue := c.Query("uid")
-	if userValue == "" {
-		userValue = c.GetHeader("X-User-Id")
+// SessionValidator resolves the authenticated user from the HttpOnly session
+// cookie. It deliberately does not accept a user id supplied by the client.
+type SessionValidator func(context.Context, string) (uint64, error)
+
+func RedisSessionValidator(client redis.UniversalClient) SessionValidator {
+	return func(ctx context.Context, sid string) (uint64, error) {
+		if strings.TrimSpace(sid) == "" {
+			return 0, errors.New("empty session")
+		}
+		value, err := client.Get(ctx, common.Join("rc:session", ":", sid)).Uint64()
+		if err != nil || value == 0 {
+			return 0, errors.New("invalid session")
+		}
+		return value, nil
 	}
-	userID, err := strconv.ParseUint(userValue, 10, 64)
-	if err != nil || userID == 0 {
-		return Identity{}, errors.New("invalid user id")
+}
+
+func authenticatedSessionUser(c *gin.Context, validators []SessionValidator) (uint64, error) {
+	if len(validators) == 0 || validators[0] == nil {
+		return 0, errors.New("session validator is not configured")
+	}
+	sid, err := common.GetCookie(c, common.SessionIdCookieName)
+	if err != nil {
+		return 0, errors.New("missing session cookie")
+	}
+	return validators[0](c.Request.Context(), sid)
+}
+
+func Authenticate(c *gin.Context, session *gocql.Session, validators ...SessionValidator) (Identity, error) {
+	userID, err := authenticatedSessionUser(c, validators)
+	if err != nil {
+		return Identity{}, err
+	}
+	// Keep legacy parameters only as consistency checks; they can never select
+	// the authenticated principal.
+	if raw := strings.TrimSpace(c.Query("uid")); raw != "" {
+		requested, parseErr := strconv.ParseUint(raw, 10, 64)
+		if parseErr != nil || requested != userID {
+			return Identity{}, errors.New("user id does not match session")
+		}
+	}
+	if raw := strings.TrimSpace(c.GetHeader("X-User-Id")); raw != "" {
+		requested, parseErr := strconv.ParseUint(raw, 10, 64)
+		if parseErr != nil || requested != userID {
+			return Identity{}, errors.New("user id does not match session")
+		}
 	}
 	token := c.Query("access_token")
 	if token == "" {
 		token = strings.TrimSpace(strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer "))
+	}
+	if token == "" {
+		for _, protocol := range strings.Split(c.GetHeader("Sec-WebSocket-Protocol"), ",") {
+			protocol = strings.TrimSpace(protocol)
+			if strings.HasPrefix(protocol, "nexuschat-channel.") {
+				token = strings.TrimPrefix(protocol, "nexuschat-channel.")
+				break
+			}
+		}
 	}
 	auth, err := common.Auth(&common.AuthPayload{AccessToken: token})
 	if err != nil || auth.Expired {
@@ -44,9 +93,9 @@ func Authenticate(c *gin.Context, session *gocql.Session) (Identity, error) {
 	return Identity{UserID: userID, ChannelID: auth.ChannelID}, nil
 }
 
-func RequireIdentity(session *gocql.Session) gin.HandlerFunc {
+func RequireIdentity(session *gocql.Session, validators ...SessionValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		identity, err := Authenticate(c, session)
+		identity, err := Authenticate(c, session, validators...)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"message": "unauthorized"})
 			return
@@ -62,19 +111,21 @@ func IdentityFrom(c *gin.Context) Identity {
 	return identity
 }
 
-// RequireUserID is used by pre-match APIs where a channel token does not exist
-// yet. The user service remains the source of truth; this header mirrors the
-// current frontend/user bootstrap contract.
-func RequireUserID() gin.HandlerFunc {
+// RequireUserID authenticates APIs that do not have a channel token yet.
+// The user id is always resolved from the HttpOnly session cookie.
+func RequireUserID(validators ...SessionValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		raw := c.GetHeader("X-User-Id")
-		if raw == "" {
-			raw = c.Query("uid")
-		}
-		userID, err := strconv.ParseUint(raw, 10, 64)
-		if err != nil || userID == 0 {
+		userID, err := authenticatedSessionUser(c, validators)
+		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"message": "unauthorized"})
 			return
+		}
+		if raw := strings.TrimSpace(c.GetHeader("X-User-Id")); raw != "" {
+			requested, parseErr := strconv.ParseUint(raw, 10, 64)
+			if parseErr != nil || requested != userID {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"message": "unauthorized"})
+				return
+			}
 		}
 		c.Set("identity", Identity{UserID: userID})
 		c.Next()

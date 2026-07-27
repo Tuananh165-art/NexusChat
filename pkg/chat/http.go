@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 
 	"github.com/Tuananh165-art/NexusChat/pkg/common"
 	"github.com/Tuananh165-art/NexusChat/pkg/config"
@@ -21,6 +22,7 @@ import (
 
 var (
 	sessCidKey = "sesscid"
+	sessUidKey = "sessuid"
 
 	MelodyChat MelodyChatConn
 )
@@ -43,6 +45,8 @@ type HttpServer struct {
 	forwardSvc    ForwardService
 	aiSvc         AIService
 	serveSwag     bool
+	sessionMu     sync.Mutex
+	sessionCounts map[string]int
 }
 
 func NewMelodyChatConn(config *config.Config) MelodyChatConn {
@@ -86,6 +90,7 @@ func NewHttpServer(name string, logger common.HttpLog, config *config.Config, sv
 		forwardSvc:    forwardSvc,
 		aiSvc:         aiSvc,
 		serveSwag:     config.Chat.Http.Server.Swag,
+		sessionCounts: make(map[string]int),
 	}
 }
 
@@ -107,6 +112,7 @@ func (r *HttpServer) RegisterRoutes() {
 
 	chatGroup := r.svr.Group("/api/chat")
 	{
+		chatGroup.POST("/direct", r.CreateDirectChat)
 		chatGroup.GET("", r.StartChat)
 
 		forwardAuthGroup := chatGroup.Group("/forwardauth")
@@ -116,28 +122,31 @@ func (r *HttpServer) RegisterRoutes() {
 		}
 
 		usersGroup := chatGroup.Group("/users")
-		usersGroup.Use(common.JWTAuth())
+		usersGroup.Use(common.JWTAuth(), r.requireChannelMember())
 		{
 			usersGroup.GET("", r.GetChannelUsers)
 			usersGroup.GET("/online", r.GetOnlineUsers)
 		}
 		channelGroup := chatGroup.Group("/channel")
-		channelGroup.Use(common.JWTAuth())
+		channelGroup.Use(common.JWTAuth(), r.requireChannelMember())
 		{
 			channelGroup.GET("/messages", r.ListMessages)
+			channelGroup.POST("/ws-ticket", r.IssueWebSocketTicket)
+			channelGroup.GET("/read-state", r.GetReadState)
+			channelGroup.POST("/read-state", r.MarkReadState)
 			channelGroup.GET("/pins", r.GetPinnedMessages)
 			channelGroup.GET("/search", r.SearchMessages)
 			channelGroup.GET("/media", r.ListMediaMessages)
 			channelGroup.DELETE("", r.DeleteChannel)
 		}
 		roleGroup := chatGroup.Group("/role")
-		roleGroup.Use(common.JWTAuth())
+		roleGroup.Use(common.JWTAuth(), r.requireChannelMember())
 		{
 			roleGroup.GET("", r.GetMyRole)
 			roleGroup.PUT("", r.AssignRole)
 		}
 		aiGroup := chatGroup.Group("/ai")
-		aiGroup.Use(common.JWTAuth())
+		aiGroup.Use(common.JWTAuth(), r.requireChannelMember())
 		{
 			aiGroup.POST("/rewrite", r.RewriteWithAI)
 		}
@@ -147,6 +156,7 @@ func (r *HttpServer) RegisterRoutes() {
 			roomGroup.POST("", r.CreateRoom)
 			roomGroup.POST("/join", r.JoinRoom)
 			roomGroup.POST("/:channelId/open", r.OpenRoom)
+			roomGroup.PUT("/:channelId", r.UpdateRoom)
 			roomGroup.POST("/:channelId/leave", r.LeaveRoom)
 		}
 	}

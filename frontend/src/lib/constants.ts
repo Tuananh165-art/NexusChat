@@ -1,6 +1,6 @@
 export const EVENT_TEXT = 0;
 export const EVENT_ACTION = 1;
-export const EVENT_SEEN = 2;
+// Event ID 2 is reserved for the removed legacy seen event.
 export const EVENT_FILE = 3;
 export const EVENT_EDIT = 4;
 export const EVENT_DELETE = 5;
@@ -8,6 +8,7 @@ export const EVENT_REACTION = 6;
 export const EVENT_PIN = 7;
 
 export const ACCESS_TOKEN_KEY = "rc:accesstoken";
+export const CONVERSATION_CONTEXT_KEY = "rc:conversation-context";
 
 export const QUICK_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 
@@ -37,7 +38,6 @@ export interface Message {
   payload: string;
   message_id?: string;
   time?: string;
-  seen?: boolean;
   edited_at?: number;
   deleted_for_all?: boolean;
   deleted_by?: string;
@@ -51,6 +51,8 @@ export interface Message {
 
 export interface UserInfo {
   id: string;
+  username?: string;
+  handle?: string;
   name: string;
   picture: string;
 }
@@ -58,6 +60,21 @@ export interface UserInfo {
 export interface MatchResult {
   channel_id: string;
   access_token: string;
+  kind?: "random" | "direct" | "group";
+  title?: string;
+  avatar?: string;
+  peer_user_id?: string;
+  member_count?: number;
+}
+
+export interface ConversationContext {
+  channel_id: string;
+  kind: "random" | "direct" | "group";
+  title: string;
+  avatar?: string;
+  peer_user_id?: string;
+  peer_handle?: string;
+  member_count?: number;
 }
 
 export interface FilePayload {
@@ -85,6 +102,8 @@ export interface ChannelUsersResult {
 
 export interface ChannelMessagesResult {
   messages: Message[];
+  next_ps?: string;
+  last_read_message_id?: string;
 }
 
 export interface OnlineUsersResult {

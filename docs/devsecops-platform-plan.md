@@ -36,8 +36,8 @@ Proxy variants:
 
 CD is currently direct Helm, not ArgoCD:
 
-- Deploys to the lab only on a push to the `main` branch.
-- The Kubernetes deploy job runs only after a successful push to `main`.
+- Deploys to the lab after the required image jobs succeed for a push to the `main` branch or a manual `workflow_dispatch`.
+- The Kubernetes deploy job requires the `main` push/manual-dispatch condition, `build-images`, and `build-proxy-variants` to pass.
 - The deploy job requires `build-images` and `build-proxy-variants` to pass.
 - Runner: `[self-hosted, linux, x64, k3s-lab]`.
 - App namespace: `nexuschat-lab`.

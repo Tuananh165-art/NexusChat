@@ -19,7 +19,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
   web:
-    image: tuananh165/nexuschat-web:kafka
+    image: tuananh165/nexuschat-web:latest
     build:
       context: .
       dockerfile: ./build/Dockerfile.web
@@ -59,7 +59,7 @@ services:
       - ai-postgres
       - redis-node-0
   random-chat:
-    image: tuananh165/nexuschat-api:kafka
+    image: tuananh165/nexuschat-api:latest
     build:
       context: .
       dockerfile: ./build/Dockerfile.api
@@ -74,8 +74,19 @@ services:
       CHAT_HTTP_SERVER_MAXCONN: "200"
       CHAT_HTTP_SERVER_SWAG: "true"
       CHAT_GRPC_SERVER_PORT: "4000"
-      CHAT_GRPC_CLIENT_USER_ENDPOINT: "reverse-proxy:80"
-      CHAT_GRPC_CLIENT_FORWARDER_ENDPOINT: "reverse-proxy:80"
+      NEXUSCHAT_GRPC_SHARED_SECRET: ${NEXUSCHAT_GRPC_SHARED_SECRET:-nexuschat-local-grpc-secret}
+      NEXUSCHAT_GRPC_ASSERTION_KEY_ID: ${NEXUSCHAT_GRPC_ASSERTION_KEY_ID:-default}
+      NEXUSCHAT_GRPC_ASSERTION_PRIVATE_KEY: ${NEXUSCHAT_GRPC_ASSERTION_PRIVATE_KEY:-}
+      NEXUSCHAT_GRPC_ASSERTION_PUBLIC_KEY: ${NEXUSCHAT_GRPC_ASSERTION_PUBLIC_KEY:-}
+      NEXUSCHAT_GRPC_TLS_ENABLED: ${NEXUSCHAT_GRPC_TLS_ENABLED:-false}
+      NEXUSCHAT_GRPC_TLS_CA_FILE: ${NEXUSCHAT_GRPC_TLS_CA_FILE:-/run/secrets/grpc/ca.crt}
+      NEXUSCHAT_GRPC_TLS_CLIENT_CERT_FILE: ${NEXUSCHAT_GRPC_TLS_CLIENT_CERT_FILE:-/run/secrets/grpc/client.crt}
+      NEXUSCHAT_GRPC_TLS_CLIENT_KEY_FILE: ${NEXUSCHAT_GRPC_TLS_CLIENT_KEY_FILE:-/run/secrets/grpc/client.key}
+      NEXUSCHAT_GRPC_TLS_SERVER_CERT_FILE: ${NEXUSCHAT_GRPC_TLS_SERVER_CERT_FILE:-/run/secrets/grpc/server.crt}
+      NEXUSCHAT_GRPC_TLS_SERVER_KEY_FILE: ${NEXUSCHAT_GRPC_TLS_SERVER_KEY_FILE:-/run/secrets/grpc/server.key}
+      NEXUSCHAT_GRPC_TLS_SERVER_NAME: ${NEXUSCHAT_GRPC_TLS_SERVER_NAME:-localhost}
+      CHAT_GRPC_CLIENT_USER_ENDPOINT: "user:4000"
+      CHAT_GRPC_CLIENT_FORWARDER_ENDPOINT: "forwarder:4000"
       CHAT_GRPC_CLIENT_SAFETY_ENDPOINT: "safety:4003"
       CHAT_MESSAGE_MAXNUM: "5000"
       CHAT_MESSAGE_PAGINATIONNUM: "5000"
@@ -111,10 +122,7 @@ services:
       - kafka
       - ai-service
   forwarder:
-    image: tuananh165/nexuschat-api:kafka
-    build:
-      context: .
-      dockerfile: ./build/Dockerfile.api
+    image: tuananh165/nexuschat-api:latest
     restart: always
     expose:
       - "4000"
@@ -122,6 +130,17 @@ services:
       - forwarder
     environment:
       FORWARDER_GRPC_SERVER_PORT: "4000"
+      NEXUSCHAT_GRPC_SHARED_SECRET: ${NEXUSCHAT_GRPC_SHARED_SECRET:-nexuschat-local-grpc-secret}
+      NEXUSCHAT_GRPC_ASSERTION_KEY_ID: ${NEXUSCHAT_GRPC_ASSERTION_KEY_ID:-default}
+      NEXUSCHAT_GRPC_ASSERTION_PRIVATE_KEY: ${NEXUSCHAT_GRPC_ASSERTION_PRIVATE_KEY:-}
+      NEXUSCHAT_GRPC_ASSERTION_PUBLIC_KEY: ${NEXUSCHAT_GRPC_ASSERTION_PUBLIC_KEY:-}
+      NEXUSCHAT_GRPC_TLS_ENABLED: ${NEXUSCHAT_GRPC_TLS_ENABLED:-false}
+      NEXUSCHAT_GRPC_TLS_CA_FILE: ${NEXUSCHAT_GRPC_TLS_CA_FILE:-/run/secrets/grpc/ca.crt}
+      NEXUSCHAT_GRPC_TLS_CLIENT_CERT_FILE: ${NEXUSCHAT_GRPC_TLS_CLIENT_CERT_FILE:-/run/secrets/grpc/client.crt}
+      NEXUSCHAT_GRPC_TLS_CLIENT_KEY_FILE: ${NEXUSCHAT_GRPC_TLS_CLIENT_KEY_FILE:-/run/secrets/grpc/client.key}
+      NEXUSCHAT_GRPC_TLS_SERVER_CERT_FILE: ${NEXUSCHAT_GRPC_TLS_SERVER_CERT_FILE:-/run/secrets/grpc/server.crt}
+      NEXUSCHAT_GRPC_TLS_SERVER_KEY_FILE: ${NEXUSCHAT_GRPC_TLS_SERVER_KEY_FILE:-/run/secrets/grpc/server.key}
+      NEXUSCHAT_GRPC_TLS_SERVER_NAME: ${NEXUSCHAT_GRPC_TLS_SERVER_NAME:-localhost}
       KAFKA_ADDRS: kafka:9092
       KAFKA_VERSION: "3.6.0"
       REDIS_PASSWORD: ${REDIS_PASSWORD}
@@ -139,10 +158,7 @@ services:
     depends_on:
       - kafka
   match:
-    image: tuananh165/nexuschat-api:kafka
-    build:
-      context: .
-      dockerfile: ./build/Dockerfile.api
+    image: tuananh165/nexuschat-api:latest
     restart: always
     expose:
       - "80"
@@ -152,8 +168,19 @@ services:
       MATCH_HTTP_SERVER_PORT: "80"
       MATCH_HTTP_SERVER_MAXCONN: "200"
       MATCH_HTTP_SERVER_SWAG: "true"
-      MATCH_GRPC_CLIENT_CHAT_ENDPOINT: "reverse-proxy:80"
-      MATCH_GRPC_CLIENT_USER_ENDPOINT: "reverse-proxy:80"
+      NEXUSCHAT_GRPC_SHARED_SECRET: ${NEXUSCHAT_GRPC_SHARED_SECRET:-nexuschat-local-grpc-secret}
+      NEXUSCHAT_GRPC_ASSERTION_KEY_ID: ${NEXUSCHAT_GRPC_ASSERTION_KEY_ID:-default}
+      NEXUSCHAT_GRPC_ASSERTION_PRIVATE_KEY: ${NEXUSCHAT_GRPC_ASSERTION_PRIVATE_KEY:-}
+      NEXUSCHAT_GRPC_ASSERTION_PUBLIC_KEY: ${NEXUSCHAT_GRPC_ASSERTION_PUBLIC_KEY:-}
+      NEXUSCHAT_GRPC_TLS_ENABLED: ${NEXUSCHAT_GRPC_TLS_ENABLED:-false}
+      NEXUSCHAT_GRPC_TLS_CA_FILE: ${NEXUSCHAT_GRPC_TLS_CA_FILE:-/run/secrets/grpc/ca.crt}
+      NEXUSCHAT_GRPC_TLS_CLIENT_CERT_FILE: ${NEXUSCHAT_GRPC_TLS_CLIENT_CERT_FILE:-/run/secrets/grpc/client.crt}
+      NEXUSCHAT_GRPC_TLS_CLIENT_KEY_FILE: ${NEXUSCHAT_GRPC_TLS_CLIENT_KEY_FILE:-/run/secrets/grpc/client.key}
+      NEXUSCHAT_GRPC_TLS_SERVER_CERT_FILE: ${NEXUSCHAT_GRPC_TLS_SERVER_CERT_FILE:-/run/secrets/grpc/server.crt}
+      NEXUSCHAT_GRPC_TLS_SERVER_KEY_FILE: ${NEXUSCHAT_GRPC_TLS_SERVER_KEY_FILE:-/run/secrets/grpc/server.key}
+      NEXUSCHAT_GRPC_TLS_SERVER_NAME: ${NEXUSCHAT_GRPC_TLS_SERVER_NAME:-localhost}
+      MATCH_GRPC_CLIENT_CHAT_ENDPOINT: "random-chat:4000"
+      MATCH_GRPC_CLIENT_USER_ENDPOINT: "user:4000"
       MATCH_GRPC_CLIENT_SAFETY_ENDPOINT: "safety:4003"
       MATCH_GRPC_CLIENT_DISCOVERY_ENDPOINT: "discovery:4004"
       KAFKA_ADDRS: kafka:9092
@@ -170,10 +197,7 @@ services:
       - "traefik.http.routers.match.service=match"
       - "traefik.http.services.match.loadbalancer.server.port=80"
   uploader:
-    image: tuananh165/nexuschat-api:kafka
-    build:
-      context: .
-      dockerfile: ./build/Dockerfile.api
+    image: tuananh165/nexuschat-api:latest
     restart: always
     depends_on:
       - minio
@@ -210,10 +234,7 @@ services:
       - "traefik.http.routers.uploader-swagger.service=uploader-swagger"
       - "traefik.http.services.uploader-swagger.loadbalancer.server.port=80"
   user:
-    image: tuananh165/nexuschat-api:kafka
-    build:
-      context: .
-      dockerfile: ./build/Dockerfile.api
+    image: tuananh165/nexuschat-api:latest
     restart: always
     expose:
       - "80"
@@ -223,9 +244,32 @@ services:
       USER_HTTP_SERVER_PORT: "80"
       USER_HTTP_SERVER_SWAG: "true"
       USER_GRPC_SERVER_PORT: "4000"
-      USER_AUTH_COOKIE_DOMAIN: "localhost"
+      NEXUSCHAT_GRPC_SHARED_SECRET: ${NEXUSCHAT_GRPC_SHARED_SECRET:-nexuschat-local-grpc-secret}
+      NEXUSCHAT_GRPC_ASSERTION_KEY_ID: ${NEXUSCHAT_GRPC_ASSERTION_KEY_ID:-default}
+      NEXUSCHAT_GRPC_ASSERTION_PRIVATE_KEY: ${NEXUSCHAT_GRPC_ASSERTION_PRIVATE_KEY:-}
+      NEXUSCHAT_GRPC_ASSERTION_PUBLIC_KEY: ${NEXUSCHAT_GRPC_ASSERTION_PUBLIC_KEY:-}
+      NEXUSCHAT_GRPC_TLS_ENABLED: ${NEXUSCHAT_GRPC_TLS_ENABLED:-false}
+      NEXUSCHAT_GRPC_TLS_CA_FILE: ${NEXUSCHAT_GRPC_TLS_CA_FILE:-/run/secrets/grpc/ca.crt}
+      NEXUSCHAT_GRPC_TLS_CLIENT_CERT_FILE: ${NEXUSCHAT_GRPC_TLS_CLIENT_CERT_FILE:-/run/secrets/grpc/client.crt}
+      NEXUSCHAT_GRPC_TLS_CLIENT_KEY_FILE: ${NEXUSCHAT_GRPC_TLS_CLIENT_KEY_FILE:-/run/secrets/grpc/client.key}
+      NEXUSCHAT_GRPC_TLS_SERVER_CERT_FILE: ${NEXUSCHAT_GRPC_TLS_SERVER_CERT_FILE:-/run/secrets/grpc/server.crt}
+      NEXUSCHAT_GRPC_TLS_SERVER_KEY_FILE: ${NEXUSCHAT_GRPC_TLS_SERVER_KEY_FILE:-/run/secrets/grpc/server.key}
+      NEXUSCHAT_GRPC_TLS_SERVER_NAME: ${NEXUSCHAT_GRPC_TLS_SERVER_NAME:-localhost}
+      USER_GRPC_CLIENT_SAFETY_ENDPOINT: "safety:4003"
+      USER_OAUTH_GOOGLE_REDIRECTURL: ${USER_OAUTH_GOOGLE_REDIRECTURL:-http://localhost/api/user/oauth2/google/callback}
+      USER_AUTH_COOKIE_DOMAIN: ""
+      USER_AUTH_COOKIE_SECURE: "false"
+      USER_AUTH_COOKIE_SAMESITE: "lax"
+      USER_OAUTH_COOKIE_DOMAIN: ""
+      USER_OAUTH_COOKIE_SECURE: "false"
+      USER_OAUTH_COOKIE_SAMESITE: "lax"
       USER_OAUTH_GOOGLE_CLIENTID: ${USER_OAUTH_GOOGLE_CLIENTID}
       USER_OAUTH_GOOGLE_CLIENTSECRET: ${USER_OAUTH_GOOGLE_CLIENTSECRET}
+      CASSANDRA_HOSTS: cassandra
+      CASSANDRA_PORT: "9042"
+      CASSANDRA_USER: admin
+      CASSANDRA_PASSWORD: nexuschat165
+      CASSANDRA_KEYSPACE: NexusChat
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_ADDRS: redis-node-0:6379,redis-node-1:6379,redis-node-2:6379,redis-node-3:6379,redis-node-4:6379,redis-node-5:6379
       REDIS_EXPIRATIONHOUR: "24"
@@ -242,8 +286,30 @@ services:
       - "traefik.http.routers.user-grpc.service=user-grpc"
       - "traefik.http.services.user-grpc.loadbalancer.server.port=4000"
       - "traefik.http.services.user-grpc.loadbalancer.server.scheme=h2c"
+    depends_on:
+      - cassandra-init
+      - safety
+  notification:
+    image: tuananh165/nexuschat-api:latest
+    restart: always
+    command:
+      - notification
+    environment:
+      NOTIFICATION_POLLINTERVALSECOND: "2"
+      NOTIFICATION_LEASESECOND: "30"
+      NOTIFICATION_MAXATTEMPTS: "8"
+      NOTIFICATION_BASERETRYSECOND: "1"
+      NOTIFICATION_MAXRETRYSECOND: "900"
+      NOTIFICATION_BATCHSIZE: "50"
+      CASSANDRA_HOSTS: cassandra
+      CASSANDRA_PORT: "9042"
+      CASSANDRA_USER: admin
+      CASSANDRA_PASSWORD: nexuschat165
+      CASSANDRA_KEYSPACE: NexusChat
+    depends_on:
+      - cassandra-init
   safety:
-    image: tuananh165/nexuschat-safety:dev
+    image: tuananh165/nexuschat-safety:latest
     build:
       context: .
       dockerfile: ./build/Dockerfile.realtime
@@ -257,6 +323,17 @@ services:
     environment:
       SAFETY_HTTP_SERVER_PORT: "5005"
       SAFETY_GRPC_SERVER_PORT: "4003"
+      NEXUSCHAT_GRPC_SHARED_SECRET: ${NEXUSCHAT_GRPC_SHARED_SECRET:-nexuschat-local-grpc-secret}
+      NEXUSCHAT_GRPC_ASSERTION_KEY_ID: ${NEXUSCHAT_GRPC_ASSERTION_KEY_ID:-default}
+      NEXUSCHAT_GRPC_ASSERTION_PRIVATE_KEY: ${NEXUSCHAT_GRPC_ASSERTION_PRIVATE_KEY:-}
+      NEXUSCHAT_GRPC_ASSERTION_PUBLIC_KEY: ${NEXUSCHAT_GRPC_ASSERTION_PUBLIC_KEY:-}
+      NEXUSCHAT_GRPC_TLS_ENABLED: ${NEXUSCHAT_GRPC_TLS_ENABLED:-false}
+      NEXUSCHAT_GRPC_TLS_CA_FILE: ${NEXUSCHAT_GRPC_TLS_CA_FILE:-/run/secrets/grpc/ca.crt}
+      NEXUSCHAT_GRPC_TLS_CLIENT_CERT_FILE: ${NEXUSCHAT_GRPC_TLS_CLIENT_CERT_FILE:-/run/secrets/grpc/client.crt}
+      NEXUSCHAT_GRPC_TLS_CLIENT_KEY_FILE: ${NEXUSCHAT_GRPC_TLS_CLIENT_KEY_FILE:-/run/secrets/grpc/client.key}
+      NEXUSCHAT_GRPC_TLS_SERVER_CERT_FILE: ${NEXUSCHAT_GRPC_TLS_SERVER_CERT_FILE:-/run/secrets/grpc/server.crt}
+      NEXUSCHAT_GRPC_TLS_SERVER_KEY_FILE: ${NEXUSCHAT_GRPC_TLS_SERVER_KEY_FILE:-/run/secrets/grpc/server.key}
+      NEXUSCHAT_GRPC_TLS_SERVER_NAME: ${NEXUSCHAT_GRPC_TLS_SERVER_NAME:-localhost}
       SAFETY_WARN_SCORE: "40"
       SAFETY_BLOCK_SCORE: "70"
       SAFETY_RATE_LIMIT_WINDOWSECOND: "10"
@@ -287,7 +364,7 @@ services:
       - cassandra-init
       - redis-node-5
   discovery:
-    image: tuananh165/nexuschat-discovery:dev
+    image: tuananh165/nexuschat-discovery:latest
     build:
       context: .
       dockerfile: ./build/Dockerfile.realtime
@@ -301,6 +378,17 @@ services:
     environment:
       DISCOVERY_HTTP_SERVER_PORT: "5006"
       DISCOVERY_GRPC_SERVER_PORT: "4004"
+      NEXUSCHAT_GRPC_SHARED_SECRET: ${NEXUSCHAT_GRPC_SHARED_SECRET:-nexuschat-local-grpc-secret}
+      NEXUSCHAT_GRPC_ASSERTION_KEY_ID: ${NEXUSCHAT_GRPC_ASSERTION_KEY_ID:-default}
+      NEXUSCHAT_GRPC_ASSERTION_PRIVATE_KEY: ${NEXUSCHAT_GRPC_ASSERTION_PRIVATE_KEY:-}
+      NEXUSCHAT_GRPC_ASSERTION_PUBLIC_KEY: ${NEXUSCHAT_GRPC_ASSERTION_PUBLIC_KEY:-}
+      NEXUSCHAT_GRPC_TLS_ENABLED: ${NEXUSCHAT_GRPC_TLS_ENABLED:-false}
+      NEXUSCHAT_GRPC_TLS_CA_FILE: ${NEXUSCHAT_GRPC_TLS_CA_FILE:-/run/secrets/grpc/ca.crt}
+      NEXUSCHAT_GRPC_TLS_CLIENT_CERT_FILE: ${NEXUSCHAT_GRPC_TLS_CLIENT_CERT_FILE:-/run/secrets/grpc/client.crt}
+      NEXUSCHAT_GRPC_TLS_CLIENT_KEY_FILE: ${NEXUSCHAT_GRPC_TLS_CLIENT_KEY_FILE:-/run/secrets/grpc/client.key}
+      NEXUSCHAT_GRPC_TLS_SERVER_CERT_FILE: ${NEXUSCHAT_GRPC_TLS_SERVER_CERT_FILE:-/run/secrets/grpc/server.crt}
+      NEXUSCHAT_GRPC_TLS_SERVER_KEY_FILE: ${NEXUSCHAT_GRPC_TLS_SERVER_KEY_FILE:-/run/secrets/grpc/server.key}
+      NEXUSCHAT_GRPC_TLS_SERVER_NAME: ${NEXUSCHAT_GRPC_TLS_SERVER_NAME:-localhost}
       DISCOVERY_GRPC_CLIENT_SAFETY_ENDPOINT: "safety:4003"
       DISCOVERY_CANDIDATELIMIT: "20"
       DISCOVERY_RECENTPEERDAY: "7"
@@ -329,7 +417,7 @@ services:
       - cassandra-init
       - redis-node-5
   workspace:
-    image: tuananh165/nexuschat-workspace:dev
+    image: tuananh165/nexuschat-workspace:latest
     build:
       context: .
       dockerfile: ./build/Dockerfile.realtime
@@ -343,6 +431,17 @@ services:
     environment:
       WORKSPACE_HTTP_SERVER_PORT: "5007"
       WORKSPACE_GRPC_SERVER_PORT: "4005"
+      NEXUSCHAT_GRPC_SHARED_SECRET: ${NEXUSCHAT_GRPC_SHARED_SECRET:-nexuschat-local-grpc-secret}
+      NEXUSCHAT_GRPC_ASSERTION_KEY_ID: ${NEXUSCHAT_GRPC_ASSERTION_KEY_ID:-default}
+      NEXUSCHAT_GRPC_ASSERTION_PRIVATE_KEY: ${NEXUSCHAT_GRPC_ASSERTION_PRIVATE_KEY:-}
+      NEXUSCHAT_GRPC_ASSERTION_PUBLIC_KEY: ${NEXUSCHAT_GRPC_ASSERTION_PUBLIC_KEY:-}
+      NEXUSCHAT_GRPC_TLS_ENABLED: ${NEXUSCHAT_GRPC_TLS_ENABLED:-false}
+      NEXUSCHAT_GRPC_TLS_CA_FILE: ${NEXUSCHAT_GRPC_TLS_CA_FILE:-/run/secrets/grpc/ca.crt}
+      NEXUSCHAT_GRPC_TLS_CLIENT_CERT_FILE: ${NEXUSCHAT_GRPC_TLS_CLIENT_CERT_FILE:-/run/secrets/grpc/client.crt}
+      NEXUSCHAT_GRPC_TLS_CLIENT_KEY_FILE: ${NEXUSCHAT_GRPC_TLS_CLIENT_KEY_FILE:-/run/secrets/grpc/client.key}
+      NEXUSCHAT_GRPC_TLS_SERVER_CERT_FILE: ${NEXUSCHAT_GRPC_TLS_SERVER_CERT_FILE:-/run/secrets/grpc/server.crt}
+      NEXUSCHAT_GRPC_TLS_SERVER_KEY_FILE: ${NEXUSCHAT_GRPC_TLS_SERVER_KEY_FILE:-/run/secrets/grpc/server.key}
+      NEXUSCHAT_GRPC_TLS_SERVER_NAME: ${NEXUSCHAT_GRPC_TLS_SERVER_NAME:-localhost}
       WORKSPACE_GRPC_CLIENT_CHAT_ENDPOINT: "chat:4000"
       WORKSPACE_WORKERS: "4"
       WORKSPACE_REMINDERPOLLSECOND: "15"
@@ -396,7 +495,7 @@ services:
     depends_on:
       - minio
     entrypoint: >
-      /bin/sh -c " set -e; /usr/bin/mc config host add myminio http://minio:9000 testaccesskey testsecret; /usr/bin/mc mb myminio/myfilebucket; /usr/bin/mc anonymous set private myminio/myfilebucket; exit 0; "
+      /bin/sh -c " set -e; /usr/bin/mc config host add myminio http://minio:9000 testaccesskey testsecret; if ! /usr/bin/mc stat myminio/myfilebucket >/dev/null 2>&1; then /usr/bin/mc mb myminio/myfilebucket; fi; /usr/bin/mc anonymous set private myminio/myfilebucket; exit 0; "
   prometheus:
     image: prom/prometheus:v2.45.0
     restart: always
@@ -569,10 +668,21 @@ services:
         until cqlsh cassandra 9042 -e "DESCRIBE KEYSPACES"; do
           sleep 5
         done
+        set -eu
         cqlsh cassandra 9042 -f /schema/init.cql
-        if [ -f /schema/migrations/002_replace_realtime_services.cql ]; then
-          cqlsh cassandra 9042 -f /schema/migrations/002_replace_realtime_services.cql
-        fi
+        for migration in /schema/migrations/*.cql; do
+          if [ ! -f "$$migration" ]; then continue; fi
+          migration_id=$$(basename "$$migration" .cql)
+          if cqlsh cassandra 9042 -e "USE \"NexusChat\"; SELECT migration_id FROM schema_migrations WHERE migration_id = '$$migration_id';" | grep -q "$$migration_id"; then
+            continue
+          fi
+          if ! cqlsh cassandra 9042 -f "$$migration"; then
+            # 004 predates the ledger on upgraded volumes and may already have
+            # added the column; all other migration failures are fatal.
+            if [ "$$migration_id" != "004_group_room_avatar" ]; then exit 1; fi
+          fi
+          cqlsh cassandra 9042 -e "USE \"NexusChat\"; INSERT INTO schema_migrations (migration_id, applied_at) VALUES ('$$migration_id', dateOf(now()));"
+        done
 
 volumes:
   minio_data:

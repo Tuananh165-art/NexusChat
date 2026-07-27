@@ -12,18 +12,26 @@ global:
   commonEnv:
     KAFKA_ADDRS: kafka.kafka.svc.cluster.local:9092
     KAFKA_VERSION: "3.6.0"
-    REDIS_ADDRS: redis-master.redis.svc.cluster.local:6379
     REDIS_EXPIRATIONHOUR: "24"
-    CASSANDRA_HOSTS: cassandra.cassandra.svc.cluster.local
-    CASSANDRA_PORT: "9042"
-    CASSANDRA_KEYSPACE: NexusChat
     OBSERVABILITY_PROMETHEUS_PORT: "8080"
     OBSERVABILITY_TRACING_OTLPENDPOINT: otel-collector.monitoring.svc.cluster.local:4318
   envFromSecrets:
     - nexuschat-runtime
+  grpcSharedSecretSecretName: nexuschat-runtime
+
+grpcSecurity:
+  # Enable only when the runtime secret contains assertion keys and the mTLS
+  # secret contains ca.crt, client.crt, client.key, server.crt, and server.key.
+  enabled: false
+  assertionSecretName: nexuschat-runtime
+  tlsSecretName: nexuschat-grpc-mtls
+  mountPath: /etc/nexuschat/grpc-tls
+  serverName: nexuschat
 
 imageDefaults:
-  pullPolicy: IfNotPresent
+  # SHA-tagged releases remain immutable; Always also makes mutable aliases
+  # such as latest refresh correctly when used for a lab rollout.
+  pullPolicy: Always
   tag: latest
 
 ingress:
@@ -166,8 +174,13 @@ services:
       USER_HTTP_SERVER_PORT: "8081"
       USER_HTTP_SERVER_SWAG: "false"
       USER_GRPC_SERVER_PORT: "4000"
-      USER_AUTH_COOKIE_DOMAIN: nexuschat.example.com
-      USER_OAUTH_COOKIE_DOMAIN: nexuschat.example.com
+      USER_AUTH_COOKIE_DOMAIN: ""
+      USER_AUTH_COOKIE_SECURE: "true"
+      USER_AUTH_COOKIE_SAMESITE: lax
+      USER_OAUTH_COOKIE_DOMAIN: ""
+      USER_OAUTH_COOKIE_SECURE: "true"
+      USER_OAUTH_COOKIE_SAMESITE: lax
+      USER_OAUTH_GOOGLE_REDIRECTURL: https://nexuschat.click/api/user/oauth2/google/callback
     resources:
       requests:
         cpu: 100m
@@ -180,6 +193,31 @@ services:
       minReplicas: 2
       maxReplicas: 8
       targetCPUUtilizationPercentage: 70
+
+  notification:
+    enabled: true
+    image:
+      repository: nexuschat-api
+    command: ["notification"]
+    replicas: 1
+    containerPort: 8080
+    metricsPort: 8080
+    probesEnabled: false
+    path: ""
+    env:
+      NOTIFICATION_POLLINTERVALSECOND: "2"
+      NOTIFICATION_LEASESECOND: "30"
+      NOTIFICATION_MAXATTEMPTS: "8"
+      NOTIFICATION_BASERETRYSECOND: "1"
+      NOTIFICATION_MAXRETRYSECOND: "900"
+      NOTIFICATION_BATCHSIZE: "50"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 96Mi
+      limits:
+        cpu: 500m
+        memory: 384Mi
 
   uploader:
     enabled: true
@@ -262,11 +300,10 @@ services:
     path: /api/ai
     healthPath: /health
     readinessPath: /ready
-    env:
-      AI_HOST: 0.0.0.0
-      AI_PORT: "8090"
-      AI_ENVIRONMENT: staging
-      REDIS_URL: redis://redis-master.redis.svc.cluster.local:6379/0
+    env: {}
+    envFromSecrets:
+      - nexuschat-runtime
+      - nexuschat-ai-service
     resources:
       requests:
         cpu: 200m
@@ -293,11 +330,6 @@ services:
     env:
       SAFETY_HTTP_SERVER_PORT: "5005"
       SAFETY_GRPC_SERVER_PORT: "4003"
-      SAFETY_WARN_SCORE: "40"
-      SAFETY_BLOCK_SCORE: "70"
-      SAFETY_RATE_LIMIT_WINDOWSECOND: "10"
-      SAFETY_RATE_LIMIT_MAXMESSAGES: "12"
-      SAFETY_RATE_LIMIT_MUTESECOND: "30"
       SAFETY_WORKERS: "4"
     resources:
       requests:
@@ -326,8 +358,6 @@ services:
       DISCOVERY_HTTP_SERVER_PORT: "5006"
       DISCOVERY_GRPC_SERVER_PORT: "4004"
       DISCOVERY_GRPC_CLIENT_SAFETY_ENDPOINT: "safety:4003"
-      DISCOVERY_CANDIDATELIMIT: "20"
-      DISCOVERY_RECENTPEERDAY: "7"
       DISCOVERY_WORKERS: "4"
     resources:
       requests:
@@ -357,7 +387,6 @@ services:
       WORKSPACE_GRPC_SERVER_PORT: "4005"
       WORKSPACE_GRPC_CLIENT_CHAT_ENDPOINT: "chat:4000"
       WORKSPACE_WORKERS: "4"
-      WORKSPACE_REMINDERPOLLSECOND: "15"
     resources:
       requests:
         cpu: 100m

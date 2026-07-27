@@ -6,12 +6,14 @@ This document describes the current NexusChat runtime: Go services, the Next.js 
 
 | File | Contents |
 |---|---|
+| [Project Reference](project-reference.md) | Complete business workflows, services, features, APIs, data ownership, migration policy, technology decisions, and limitations |
 | [Architecture](architecture.md) | Service architecture, dependencies, Traefik, data flow, and observability |
 | [Kubernetes/K3s Deployment Guide](deploy-k8s-guide.md) | Installing dependencies, deploying the lab Helm release, NodePort dashboards, verification, and rollback |
 | [Docker Hub Direct K8s Rollout](dockerhub-direct-k8s-rollout.md) | Git SHA image process, security gates, and direct Helm CD |
 | [DevSecOps Platform Plan](devsecops-platform-plan.md) | CI, CD, Trivy, CodeQL, Gitleaks, SBOM, Cosign, and current limitations |
 | [AI Service Plan](ai-service-plan.md) | AI service design and implementation status |
 | [Clean Code And Design Patterns](clean-code-design-patterns.md) | Coding and testing conventions |
+| [Internal gRPC Security](internal-grpc-security.md) | Signed end-user assertions, mTLS configuration, key/certificate rotation, and failure behavior |
 | [AI Service README](../ai-service/README.md) | How to run and configure the AI service |
 
 ## Source of truth by environment
@@ -118,7 +120,7 @@ NodePort provides direct access to the node and does not pass through Traefik. I
 
 The current workflow is `.github/workflows/devsecops-platform.yml`.
 
-The workflow triggers on `workflow_dispatch`, `pull_request` to any branch, pushes to `main` or `kafka`, and `v*` tags. The Kubernetes deploy job runs only after a successful push to `main`, requires `build-images` and `build-proxy-variants` to pass, and requires a self-hosted runner with labels `[self-hosted, linux, x64, k3s-lab]`.
+The workflow triggers on `workflow_dispatch`, `pull_request` to any branch, pushes to `main` or `kafka`, and `v*` tags. The Kubernetes deploy job runs after the required image jobs succeed for either a push to `main` or a manual `workflow_dispatch`; it requires `build-images` and `build-proxy-variants` to pass, plus a self-hosted runner with labels `[self-hosted, linux, x64, k3s-lab]`.
 
 - Pull Request: tests, lint, builds, Helm rendering, and security scans.
 - Push to `main`, `kafka`, or a `v*` tag: build images, blocking Trivy scans, SBOM generation, and Cosign signing.

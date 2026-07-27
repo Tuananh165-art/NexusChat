@@ -103,7 +103,7 @@ Direct smoke test:
 curl -i http://localhost:8090/health
 curl -X POST http://localhost:8090/v1/assistant/rewrite \
   -H 'Content-Type: application/json' \
-  -d '{"text":"xin chao toi muon viet lai cau nay","tone":"professional","locale":"Vietnamese"}'
+  -d '{"text":"Hello, please rewrite this sentence","tone":"professional","locale":"en-US"}'
 ```
 
 Through local Docker Compose/Traefik:
@@ -112,7 +112,7 @@ Through local Docker Compose/Traefik:
 curl -i http://localhost/api/ai/health
 curl -X POST http://localhost/api/ai/v1/assistant/rewrite \
   -H 'Content-Type: application/json' \
-  -d '{"text":"xin chao toi muon viet lai cau nay","tone":"professional","locale":"Vietnamese"}'
+  -d '{"text":"Hello, please rewrite this sentence","tone":"professional","locale":"en-US"}'
 ```
 
 ## Kubernetes behavior
@@ -122,10 +122,11 @@ Helm chart service key is `services.ai-service`.
 - Image: `docker.io/tuananh165/nexuschat-ai-service:<tag>` unless overridden.
 - Container port: `8090`.
 - Health paths: `/health`, `/ready`.
-- Ingress path: `/api/ai(/|$)(.*)` with nginx rewrite target `/$2` in default chart.
+- The default chart uses Traefik path routing and strips `/api/ai` when the AI ingress is enabled.
+- The lab override disables the public AI ingress; use `kubectl -n nexuschat-lab port-forward svc/ai-service 18090:8090` and test `http://127.0.0.1:18090/health` instead.
 - Lab command runs Alembic before Uvicorn:
   `python -m alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8090`.
-- Runtime values come from normal env plus secret `nexuschat-runtime`.
+- Runtime values come from normal env plus secrets `nexuschat-runtime` and `nexuschat-ai-service`.
 
 Required Kubernetes secret keys for real AI behavior:
 
@@ -144,4 +145,4 @@ kubectl -n nexuschat-lab rollout restart deployment/ai-service
 kubectl -n nexuschat-lab rollout status deployment/ai-service --timeout=300s
 ```
 
-If `/api/chat/ai/rewrite` fails but `/api/ai/health` works, test the AI service directly first. Placeholder `AI_ENDPOINT`, fake `AI_API_KEY`, or invalid `AI_MODEL` will break every provider-backed feature even when Kubernetes routing is healthy.
+If `/api/chat/ai/rewrite` fails but the AI health endpoint works through Docker Compose or an explicitly enabled Kubernetes ingress, test the AI service directly first. In the lab profile, use the documented port-forward because the public AI ingress is disabled. Placeholder `AI_ENDPOINT`, fake `AI_API_KEY`, or invalid `AI_MODEL` will break every provider-backed feature even when Kubernetes routing is healthy.

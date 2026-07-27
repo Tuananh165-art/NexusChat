@@ -7,14 +7,14 @@ import (
 )
 
 const (
-	EventText = iota
-	EventAction
-	EventSeen
-	EventFile
-	EventEdit
-	EventDelete
-	EventReaction
-	EventPin
+	EventText   = 0
+	EventAction = 1
+	// Event ID 2 is reserved for the removed legacy seen event.
+	EventFile     = 3
+	EventEdit     = 4
+	EventDelete   = 5
+	EventReaction = 6
+	EventPin      = 7
 )
 
 type Action string
@@ -34,7 +34,6 @@ type Message struct {
 	ChannelID     uint64            `json:"channel_id"`
 	UserID        uint64            `json:"user_id"`
 	Payload       string            `json:"payload"`
-	Seen          bool              `json:"seen"`
 	Time          int64             `json:"time"`
 	EditedAt      int64             `json:"edited_at,omitempty"`
 	DeletedForAll bool              `json:"deleted_for_all,omitempty"`
@@ -54,11 +53,13 @@ type ReplyPreview struct {
 type Channel struct {
 	ID          uint64
 	AccessToken string
+	Room        *Room
 }
 
 type Room struct {
 	ChannelID   uint64    `json:"channel_id"`
 	Name        string    `json:"name"`
+	Avatar      string    `json:"avatar,omitempty"`
 	OwnerID     uint64    `json:"owner_id"`
 	InviteCode  string    `json:"invite_code"`
 	MemberCount int       `json:"member_count"`
@@ -165,7 +166,6 @@ func (m *Message) ToPresenter() *MessagePresenter {
 		Event:         m.Event,
 		UserID:        strconv.FormatUint(m.UserID, 10),
 		Payload:       m.Payload,
-		Seen:          m.Seen,
 		Time:          m.Time,
 		EditedAt:      m.EditedAt,
 		DeletedForAll: m.DeletedForAll,

@@ -1,12 +1,7 @@
--- NexusChat migration 002: replace Presence/Notification/Call with
--- Safety/Discovery/Workspace. Run after backing up the keyspace.
+-- NexusChat migration 002: add Safety/Discovery/Workspace tables.
+-- This migration is intentionally non-destructive. Legacy tables are retained
+-- because notification and call data may still be referenced by live services.
 USE "NexusChat";
-
-DROP TABLE IF EXISTS notifications_by_user;
-DROP TABLE IF EXISTS push_subscriptions_by_user;
-DROP TABLE IF EXISTS notification_preferences;
-DROP TABLE IF EXISTS calls_by_user;
-DROP TABLE IF EXISTS calls_by_channel;
 
 CREATE TABLE IF NOT EXISTS safety_rules (rule_id text PRIMARY KEY, name text, pattern text, score int, enabled boolean, created_at timestamp, updated_at timestamp);
 CREATE TABLE IF NOT EXISTS safety_reports_by_id (report_id text PRIMARY KEY, reporter_id bigint, target_user_id bigint, channel_id bigint, message_id bigint, reason text, details text, status text, created_at timestamp, updated_at timestamp);

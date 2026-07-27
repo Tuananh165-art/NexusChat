@@ -2,15 +2,18 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Tuananh165-art/NexusChat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/notification"
 	"github.com/Tuananh165-art/NexusChat/pkg/realtime"
+	"github.com/gocql/gocql"
 )
 
 const (
@@ -21,14 +24,15 @@ const (
 )
 
 type MessageService interface {
+	AuthorizeInteraction(ctx context.Context, channelID, userID uint64) error
 	BroadcastTextMessage(ctx context.Context, channelID, userID uint64, payload string, parentID uint64) error
 	BroadcastConnectMessage(ctx context.Context, channelID, userID uint64) error
 	BroadcastActionMessage(ctx context.Context, channelID, userID uint64, action Action) error
 	BroadcastFileMessage(ctx context.Context, channelID, userID uint64, payload string) error
-	MarkMessageSeen(ctx context.Context, channelID, userID, messageID uint64) error
-	InsertMessage(ctx context.Context, msg *Message) error
+	MarkMessageRead(ctx context.Context, channelID, userID, messageID uint64) error
+	GetLastReadMessageID(ctx context.Context, channelID, userID uint64) (uint64, error)
 	PublishMessage(ctx context.Context, msg *Message) error
-	ListMessages(ctx context.Context, channelID uint64, pageState string) ([]*Message, string, error)
+	ListMessages(ctx context.Context, channelID, userID uint64, pageState string) ([]*Message, string, uint64, error)
 	EditMessage(ctx context.Context, channelID, userID, messageID uint64, newPayload string) error
 	DeleteMessageForAll(ctx context.Context, channelID, userID, messageID uint64) error
 	AddReaction(ctx context.Context, channelID, userID, messageID uint64, emoji string) error
@@ -42,7 +46,9 @@ type MessageService interface {
 
 type UserService interface {
 	AddUserToChannel(ctx context.Context, channelID, userID uint64) error
+	IsFriend(ctx context.Context, userID, peerID uint64) (bool, error)
 	GetUser(ctx context.Context, userID uint64) (*User, error)
+	GetUserIDBySession(ctx context.Context, sid string) (uint64, error)
 	IsChannelUserExist(ctx context.Context, channelID, userID uint64) (bool, error)
 	GetChannelUserIDs(ctx context.Context, channelID uint64) ([]uint64, error)
 	AddOnlineUser(ctx context.Context, channelID, userID uint64) error
@@ -53,12 +59,18 @@ type UserService interface {
 type ChannelService interface {
 	CreateChannel(ctx context.Context) (*Channel, error)
 	DeleteChannel(ctx context.Context, channelID uint64) error
+	GetChannelKind(ctx context.Context, channelID uint64) (string, error)
+	GetDirectPeer(ctx context.Context, channelID, userID uint64) (uint64, error)
 	AssignRole(ctx context.Context, channelID, userID uint64, role Role) error
 	GetRole(ctx context.Context, channelID, userID uint64) (Role, error)
 	CreateRoom(ctx context.Context, ownerID uint64, name string, memberIDs []uint64) (*Room, error)
+	UpdateRoomAvatar(ctx context.Context, userID, channelID uint64, avatar string) (*Room, error)
+	CreateDirectChannel(ctx context.Context, userID, targetUserID uint64) (*Channel, error)
 	JoinRoom(ctx context.Context, userID uint64, inviteCode string) (*Room, error)
 	ListRooms(ctx context.Context, userID uint64) ([]Room, error)
 	OpenRoom(ctx context.Context, userID, channelID uint64) (*Channel, error)
+	IssueWebSocketTicket(ctx context.Context, userID, channelID uint64, accessToken string) (string, error)
+	ConsumeWebSocketTicket(ctx context.Context, ticket string) (uint64, uint64, string, error)
 	LeaveRoom(ctx context.Context, userID, channelID uint64) error
 }
 
@@ -68,14 +80,57 @@ type ForwardService interface {
 }
 
 type MessageServiceImpl struct {
-	msgRepo  MessageRepoCache
-	userRepo UserRepoCache
-	sf       common.IDGenerator
+	msgRepo     MessageRepoCache
+	userRepo    UserRepoCache
+	channelRepo ChannelRepoCache
+	sf          common.IDGenerator
 }
 
-func NewMessageServiceImpl(msgRepo MessageRepoCache, userRepo UserRepoCache, sf common.IDGenerator) *MessageServiceImpl {
-	return &MessageServiceImpl{msgRepo, userRepo, sf}
+func NewMessageServiceImpl(msgRepo MessageRepoCache, userRepo UserRepoCache, channelRepo ChannelRepoCache, sf common.IDGenerator) *MessageServiceImpl {
+	return &MessageServiceImpl{msgRepo: msgRepo, userRepo: userRepo, channelRepo: channelRepo, sf: sf}
 }
+func (svc *MessageServiceImpl) AuthorizeInteraction(ctx context.Context, channelID, userID uint64) error {
+	members, err := svc.userRepo.GetChannelUserIDs(ctx, channelID)
+	if err != nil {
+		return err
+	}
+	isMember := false
+	peers := make([]uint64, 0, len(members))
+	for _, memberID := range members {
+		if memberID == userID {
+			isMember = true
+			continue
+		}
+		if memberID != 0 {
+			peers = append(peers, memberID)
+		}
+	}
+	if !isMember {
+		return common.ErrUnauthorized
+	}
+	kind, kindErr := svc.channelRepo.GetChannelKind(ctx, channelID)
+	if kindErr == nil && kind == "direct" {
+		if len(peers) != 1 {
+			return common.ErrUnauthorized
+		}
+		friends, err := svc.userRepo.AreFriends(ctx, userID, peers[0])
+		if err != nil {
+			return fmt.Errorf("check friendship: %w", err)
+		}
+		if !friends {
+			return ErrDirectChatRequiresFriend
+		}
+		blocked, err := usersBlocked(ctx, userID, peers[0])
+		if err != nil {
+			return fmt.Errorf("check block policy: %w", err)
+		}
+		if blocked {
+			return ErrDirectChatRequiresFriend
+		}
+	}
+	return nil
+}
+
 func (svc *MessageServiceImpl) BroadcastTextMessage(ctx context.Context, channelID, userID uint64, payload string, parentID uint64) error {
 	msg, err := svc.newMessage(EventText, channelID, userID, payload)
 	if err != nil {
@@ -83,16 +138,14 @@ func (svc *MessageServiceImpl) BroadcastTextMessage(ctx context.Context, channel
 	}
 	msg.ParentID = parentID
 	if endpoint := os.Getenv("CHAT_GRPC_CLIENT_SAFETY_ENDPOINT"); endpoint != "" {
-		decision, moderationErr := realtime.CallStructRPC(ctx, endpoint, "nexuschat.safety.v1.SafetyService", "ModerateMessage", map[string]any{
+		decision, moderationErr := realtime.CallStructRPC(ctx, endpoint, "chat", "nexuschat.safety.v1.SafetyService", "ModerateMessage", map[string]any{
 			"channel_id": strconv.FormatUint(channelID, 10),
 			"message_id": strconv.FormatUint(msg.MessageID, 10),
 			"user_id":    strconv.FormatUint(userID, 10),
 			"content":    payload,
 		})
 		if moderationErr != nil {
-			// Degraded mode: keep chat available; Safety consumes the chat event
-			// and can apply an asynchronous decision later.
-			slog.Warn("safety moderation unavailable", "error", moderationErr)
+			return fmt.Errorf("safety moderation unavailable: %w", moderationErr)
 		} else if decision != nil {
 			action := decision.GetFields()["action"].GetStringValue()
 			if action == "block" {
@@ -150,19 +203,14 @@ func (svc *MessageServiceImpl) BroadcastFileMessage(ctx context.Context, channel
 	}
 	return nil
 }
-func (svc *MessageServiceImpl) MarkMessageSeen(ctx context.Context, channelID, userID, messageID uint64) error {
-	if err := svc.msgRepo.MarkMessageSeen(ctx, channelID, messageID); err != nil {
-		return fmt.Errorf("error mark message %d seen in channel %d: %w", messageID, channelID, err)
-	}
-	msg, err := svc.newMessage(EventSeen, channelID, userID, formatUint(messageID))
-	if err != nil {
-		return fmt.Errorf("error create seen event message: %w", err)
-	}
-	msg.Seen = true
-	if err := svc.PublishMessage(ctx, msg); err != nil {
-		return fmt.Errorf("error mark message %d seen in channel %d: %w", messageID, channelID, err)
+func (svc *MessageServiceImpl) MarkMessageRead(ctx context.Context, channelID, userID, messageID uint64) error {
+	if err := svc.msgRepo.MarkMessageRead(ctx, channelID, userID, messageID); err != nil {
+		return fmt.Errorf("error mark message %d read by user %d in channel %d: %w", messageID, userID, channelID, err)
 	}
 	return nil
+}
+func (svc *MessageServiceImpl) GetLastReadMessageID(ctx context.Context, channelID, userID uint64) (uint64, error) {
+	return svc.msgRepo.GetLastReadMessageID(ctx, channelID, userID)
 }
 func (svc *MessageServiceImpl) InsertMessage(ctx context.Context, msg *Message) error {
 	if err := svc.msgRepo.InsertMessage(ctx, msg); err != nil {
@@ -176,12 +224,16 @@ func (svc *MessageServiceImpl) PublishMessage(ctx context.Context, msg *Message)
 	}
 	return nil
 }
-func (svc *MessageServiceImpl) ListMessages(ctx context.Context, channelID uint64, pageState string) ([]*Message, string, error) {
+func (svc *MessageServiceImpl) ListMessages(ctx context.Context, channelID, userID uint64, pageState string) ([]*Message, string, uint64, error) {
 	msgs, nextPageState, err := svc.msgRepo.ListMessages(ctx, channelID, pageState)
 	if err != nil {
-		return nil, "", fmt.Errorf("error list messages in channel %d with page state %s: %w", channelID, pageState, err)
+		return nil, "", 0, fmt.Errorf("error list messages in channel %d with page state %s: %w", channelID, pageState, err)
 	}
-	return msgs, nextPageState, nil
+	lastRead, err := svc.msgRepo.GetLastReadMessageID(ctx, channelID, userID)
+	if err != nil {
+		return nil, "", 0, fmt.Errorf("error get read state in channel %d for user %d: %w", channelID, userID, err)
+	}
+	return msgs, nextPageState, lastRead, nil
 }
 func (svc *MessageServiceImpl) EditMessage(ctx context.Context, channelID, userID, messageID uint64, newPayload string) error {
 	msg, err := svc.msgRepo.GetMessage(ctx, channelID, messageID)
@@ -290,6 +342,20 @@ func (svc *MessageServiceImpl) ListMediaMessages(ctx context.Context, channelID 
 	return svc.msgRepo.ListMediaMessages(ctx, channelID, mediaType, limit)
 }
 
+func usersBlocked(ctx context.Context, userID, peerID uint64) (bool, error) {
+	endpoint := os.Getenv("CHAT_GRPC_CLIENT_SAFETY_ENDPOINT")
+	if endpoint == "" {
+		return false, nil
+	}
+	result, err := realtime.CallStructRPC(ctx, endpoint, "chat", "nexuschat.safety.v1.SafetyService", "IsUserBlocked", map[string]any{
+		"user_id": strconv.FormatUint(userID, 10), "peer_id": strconv.FormatUint(peerID, 10),
+	})
+	if err != nil {
+		return true, err
+	}
+	return result != nil && result.GetFields()["blocked"].GetBoolValue(), nil
+}
+
 func (svc *MessageServiceImpl) newMessage(event int, channelID, userID uint64, payload string) (*Message, error) {
 	messageID, err := svc.sf.NextID()
 	if err != nil {
@@ -334,6 +400,12 @@ func (svc *UserServiceImpl) AddUserToChannel(ctx context.Context, channelID, use
 	}
 	return nil
 }
+func (svc *UserServiceImpl) IsFriend(ctx context.Context, userID, peerID uint64) (bool, error) {
+	return svc.userRepo.AreFriends(ctx, userID, peerID)
+}
+func (svc *UserServiceImpl) GetUserIDBySession(ctx context.Context, sid string) (uint64, error) {
+	return svc.userRepo.GetUserIDBySession(ctx, sid)
+}
 func (svc *UserServiceImpl) GetUser(ctx context.Context, userID uint64) (*User, error) {
 	user, err := svc.userRepo.GetUserByID(ctx, userID)
 	if err != nil {
@@ -376,13 +448,22 @@ func (svc *UserServiceImpl) GetOnlineUserIDs(ctx context.Context, channelID uint
 }
 
 type ChannelServiceImpl struct {
-	chanRepo ChannelRepoCache
-	userRepo UserRepoCache
-	sf       common.IDGenerator
+	chanRepo           ChannelRepoCache
+	userRepo           UserRepoCache
+	sf                 common.IDGenerator
+	notificationOutbox notification.Enqueuer
 }
 
 func NewChannelServiceImpl(chanRepo ChannelRepoCache, userRepo UserRepoCache, sf common.IDGenerator) *ChannelServiceImpl {
-	return &ChannelServiceImpl{chanRepo, userRepo, sf}
+	return newChannelService(chanRepo, userRepo, sf, nil)
+}
+
+func NewChannelServiceWithOutbox(chanRepo ChannelRepoCache, userRepo UserRepoCache, sf common.IDGenerator, outbox notification.Enqueuer) *ChannelServiceImpl {
+	return newChannelService(chanRepo, userRepo, sf, outbox)
+}
+
+func newChannelService(chanRepo ChannelRepoCache, userRepo UserRepoCache, sf common.IDGenerator, outbox notification.Enqueuer) *ChannelServiceImpl {
+	return &ChannelServiceImpl{chanRepo: chanRepo, userRepo: userRepo, sf: sf, notificationOutbox: outbox}
 }
 func (svc *ChannelServiceImpl) CreateChannel(ctx context.Context) (*Channel, error) {
 	channelID, err := svc.sf.NextID()
@@ -393,7 +474,32 @@ func (svc *ChannelServiceImpl) CreateChannel(ctx context.Context) (*Channel, err
 	if err != nil {
 		return nil, fmt.Errorf("error create channel %d: %w", channelID, err)
 	}
+	if err := svc.chanRepo.SetChannelKind(ctx, channelID, "random"); err != nil {
+		return nil, fmt.Errorf("error persist channel kind %d: %w", channelID, err)
+	}
 	return channel, nil
+}
+func (svc *ChannelServiceImpl) GetChannelKind(ctx context.Context, channelID uint64) (string, error) {
+	return svc.chanRepo.GetChannelKind(ctx, channelID)
+}
+func (svc *ChannelServiceImpl) IssueWebSocketTicket(ctx context.Context, userID, channelID uint64, accessToken string) (string, error) {
+	if userID == 0 || channelID == 0 || strings.TrimSpace(accessToken) == "" {
+		return "", ErrChannelOrUserNotFound
+	}
+	member, err := svc.userRepo.IsChannelUserExist(ctx, channelID, userID)
+	if err != nil {
+		return "", err
+	}
+	if !member {
+		return "", ErrChannelOrUserNotFound
+	}
+	return svc.chanRepo.IssueWebSocketTicket(ctx, userID, channelID, accessToken)
+}
+func (svc *ChannelServiceImpl) ConsumeWebSocketTicket(ctx context.Context, ticket string) (uint64, uint64, string, error) {
+	return svc.chanRepo.ConsumeWebSocketTicket(ctx, ticket)
+}
+func (svc *ChannelServiceImpl) GetDirectPeer(ctx context.Context, channelID, userID uint64) (uint64, error) {
+	return svc.chanRepo.GetDirectPeer(ctx, channelID, userID)
 }
 func (svc *ChannelServiceImpl) DeleteChannel(ctx context.Context, channelID uint64) error {
 	if err := svc.chanRepo.DeleteChannel(ctx, channelID); err != nil {
@@ -407,6 +513,103 @@ func (svc *ChannelServiceImpl) AssignRole(ctx context.Context, channelID, userID
 func (svc *ChannelServiceImpl) GetRole(ctx context.Context, channelID, userID uint64) (Role, error) {
 	return svc.chanRepo.GetRole(ctx, channelID, userID)
 }
+func (svc *ChannelServiceImpl) enqueueDirectChatInvite(ctx context.Context, channelID, actorID, targetID uint64) error {
+	if svc.notificationOutbox == nil {
+		return nil
+	}
+	payload, err := json.Marshal(map[string]string{
+		"channel_id": strconv.FormatUint(channelID, 10),
+		"actor_id":   strconv.FormatUint(actorID, 10),
+		"target_id":  strconv.FormatUint(targetID, 10),
+	})
+	if err != nil {
+		return err
+	}
+	intent := notification.Intent{
+		ID:        notification.DeterministicID("direct-chat-invite", strconv.FormatUint(channelID, 10), strconv.FormatUint(targetID, 10)),
+		UserID:    targetID,
+		Type:      "direct_chat_invite",
+		ActorID:   actorID,
+		Payload:   string(payload),
+		CreatedAt: time.Now().UTC(),
+	}
+	return svc.notificationOutbox.Enqueue(ctx, intent)
+}
+
+func (svc *ChannelServiceImpl) CreateDirectChannel(ctx context.Context, userID, targetUserID uint64) (*Channel, error) {
+	if userID == 0 || targetUserID == 0 || userID == targetUserID {
+		return nil, ErrChannelOrUserNotFound
+	}
+	if _, err := svc.userRepo.GetUserByID(ctx, targetUserID); err != nil {
+		return nil, err
+	}
+	blocked, blockErr := usersBlocked(ctx, userID, targetUserID)
+	if blockErr != nil {
+		return nil, fmt.Errorf("check block policy: %w", blockErr)
+	}
+	if blocked {
+		return nil, ErrDirectChatRequiresFriend
+	}
+	friends, err := svc.userRepo.AreFriends(ctx, userID, targetUserID)
+	if err != nil {
+		return nil, fmt.Errorf("check friendship: %w", err)
+	}
+	if !friends {
+		return nil, ErrDirectChatRequiresFriend
+	}
+	if existing, err := svc.chanRepo.GetDirectChannel(ctx, userID, targetUserID); err == nil {
+		if kindErr := svc.chanRepo.SetChannelKind(ctx, existing.ID, "direct"); kindErr != nil {
+			return nil, fmt.Errorf("persist existing direct channel kind: %w", kindErr)
+		}
+		if notifyErr := svc.enqueueDirectChatInvite(ctx, existing.ID, userID, targetUserID); notifyErr != nil {
+			return nil, fmt.Errorf("enqueue direct chat invite: %w", notifyErr)
+		}
+		return existing, nil
+	} else if !errors.Is(err, gocql.ErrNotFound) {
+		return nil, fmt.Errorf("lookup direct channel: %w", err)
+	}
+	channel, err := svc.CreateChannel(ctx)
+	if err != nil {
+		return nil, err
+	}
+	reserved := false
+	committed := false
+	defer func() {
+		if reserved && !committed {
+			_ = svc.chanRepo.DeleteChannel(ctx, channel.ID)
+		}
+	}()
+	if err := svc.chanRepo.CreateDirectChannel(ctx, channel.ID, userID, targetUserID); err != nil {
+		if errors.Is(err, ErrDirectChannelExists) {
+			_ = svc.chanRepo.DeleteChannel(ctx, channel.ID)
+			existing, lookupErr := svc.chanRepo.GetDirectChannel(ctx, userID, targetUserID)
+			if lookupErr != nil {
+				return nil, fmt.Errorf("lookup concurrent direct channel: %w", lookupErr)
+			}
+			if notifyErr := svc.enqueueDirectChatInvite(ctx, existing.ID, userID, targetUserID); notifyErr != nil {
+				return nil, fmt.Errorf("enqueue direct chat invite: %w", notifyErr)
+			}
+			return existing, nil
+		}
+		return nil, fmt.Errorf("reserve direct channel: %w", err)
+	}
+	reserved = true
+	if err := svc.userRepo.AddUserToChannel(ctx, channel.ID, userID); err != nil {
+		return nil, fmt.Errorf("add direct channel owner: %w", err)
+	}
+	if err := svc.userRepo.AddUserToChannel(ctx, channel.ID, targetUserID); err != nil {
+		return nil, fmt.Errorf("add direct channel peer: %w", err)
+	}
+	if err := svc.chanRepo.SetChannelKind(ctx, channel.ID, "direct"); err != nil {
+		return nil, fmt.Errorf("persist direct channel kind: %w", err)
+	}
+	if err := svc.enqueueDirectChatInvite(ctx, channel.ID, userID, targetUserID); err != nil {
+		return nil, fmt.Errorf("enqueue direct chat invite: %w", err)
+	}
+	committed = true
+	return channel, nil
+}
+
 func (svc *ChannelServiceImpl) CreateRoom(ctx context.Context, ownerID uint64, name string, memberIDs []uint64) (*Room, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -433,6 +636,13 @@ func (svc *ChannelServiceImpl) CreateRoom(ctx context.Context, ownerID uint64, n
 		if _, err := svc.userRepo.GetUserByID(ctx, memberID); err != nil {
 			return nil, fmt.Errorf("member %d not found: %w", memberID, err)
 		}
+		blocked, blockErr := usersBlocked(ctx, ownerID, memberID)
+		if blockErr != nil {
+			return nil, fmt.Errorf("check block policy for member %d: %w", memberID, blockErr)
+		}
+		if blocked {
+			return nil, fmt.Errorf("member %d is blocked by the room owner", memberID)
+		}
 		uniqueMembers[memberID] = RoleMember
 	}
 	room := &Room{
@@ -444,6 +654,9 @@ func (svc *ChannelServiceImpl) CreateRoom(ctx context.Context, ownerID uint64, n
 	if err := svc.chanRepo.CreateRoom(ctx, room); err != nil {
 		return nil, fmt.Errorf("error create room: %w", err)
 	}
+	if err := svc.chanRepo.SetChannelKind(ctx, room.ChannelID, "group"); err != nil {
+		return nil, fmt.Errorf("error persist room kind: %w", err)
+	}
 	for memberID, role := range uniqueMembers {
 		if memberID == ownerID {
 			continue
@@ -452,6 +665,25 @@ func (svc *ChannelServiceImpl) CreateRoom(ctx context.Context, ownerID uint64, n
 			return nil, fmt.Errorf("error add room member %d: %w", memberID, err)
 		}
 	}
+	room.Role = RoleOwner
+	return room, nil
+}
+func (svc *ChannelServiceImpl) UpdateRoomAvatar(ctx context.Context, userID, channelID uint64, avatar string) (*Room, error) {
+	room, err := svc.chanRepo.GetRoom(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+	if room.OwnerID != userID {
+		return nil, fmt.Errorf("only the room owner can update the avatar")
+	}
+	if len([]rune(avatar)) > 2_000_000 {
+		return nil, fmt.Errorf("room avatar is too large")
+	}
+	if err := svc.chanRepo.UpdateRoomAvatar(ctx, channelID, avatar); err != nil {
+		return nil, err
+	}
+	room.Avatar = avatar
+	room.UpdatedAt = time.Now().UTC()
 	room.Role = RoleOwner
 	return room, nil
 }
@@ -466,6 +698,22 @@ func (svc *ChannelServiceImpl) JoinRoom(ctx context.Context, userID uint64, invi
 	room, err := svc.chanRepo.GetRoomByInviteCode(ctx, inviteCode)
 	if err != nil {
 		return nil, fmt.Errorf("room invite not found: %w", err)
+	}
+	memberIDs, err := svc.userRepo.GetChannelUserIDs(ctx, room.ChannelID)
+	if err != nil {
+		return nil, fmt.Errorf("load room members: %w", err)
+	}
+	for _, memberID := range memberIDs {
+		if memberID == 0 || memberID == userID {
+			continue
+		}
+		blocked, blockErr := usersBlocked(ctx, userID, memberID)
+		if blockErr != nil {
+			return nil, fmt.Errorf("check block policy: %w", blockErr)
+		}
+		if blocked {
+			return nil, fmt.Errorf("room interaction is blocked")
+		}
 	}
 	exists, err := svc.userRepo.IsChannelUserExist(ctx, room.ChannelID, userID)
 	if err != nil {
@@ -493,14 +741,15 @@ func (svc *ChannelServiceImpl) OpenRoom(ctx context.Context, userID, channelID u
 	if !exists {
 		return nil, ErrChannelOrUserNotFound
 	}
-	if _, err := svc.chanRepo.GetRoom(ctx, channelID); err != nil {
+	room, err := svc.chanRepo.GetRoom(ctx, channelID)
+	if err != nil {
 		return nil, err
 	}
 	token, err := common.NewJWT(channelID)
 	if err != nil {
 		return nil, err
 	}
-	return &Channel{ID: channelID, AccessToken: token}, nil
+	return &Channel{ID: channelID, AccessToken: token, Room: room}, nil
 }
 func (svc *ChannelServiceImpl) LeaveRoom(ctx context.Context, userID, channelID uint64) error {
 	room, err := svc.chanRepo.GetRoom(ctx, channelID)

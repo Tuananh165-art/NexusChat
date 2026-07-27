@@ -125,7 +125,7 @@ kubectl apply -f deployments/platform/cassandra/cassandra.yaml
 kubectl -n cassandra get pods,svc,pvc
 ```
 
-After Cassandra is Ready, apply `cassandra/init.cql` and the migration `cassandra/migrations/002_replace_realtime_services.cql` according to the project backup/schema procedure. The migration deletes old tables; do not run it before backing up the keyspace.
+After Cassandra is Ready, the application Helm chart runs its pre-install/pre-upgrade migration Job. The platform manifest is already the standalone Cassandra deployment; do not apply it a second time. The Job embeds `deployments/helm/nexuschat/migrations/001_baseline.cql` and all versioned migrations `002` through `010`, checks `NexusChat.schema_migrations`, and records each successful migration. Migration `010_drop_messages_seen.cql` removes the obsolete per-message flag after old binaries are retired. Do not manually run `cassandra/init.cql` or `002` after a successful Helm migration Job. `cassandra/init.cql` remains the idempotent standalone/bootstrap schema and is used by Docker Compose; the versioned migration files are required for repeatable upgrades. Back up the keyspace before upgrades and investigate any failed Job before retrying.
 
 ### MinIO and PostgreSQL
 
@@ -318,12 +318,23 @@ kubectl -n kafka get pods,svc
 kubectl -n redis-ui get pods,svc
 kubectl get ingressclass
 
-for deploy in web chat match user uploader forwarder ai-service safety discovery workspace; do
+for deploy in web chat match user uploader forwarder ai-service safety discovery workspace notification; do
   kubectl -n nexuschat-lab rollout status deployment/$deploy --timeout=600s
 done
 
 curl -i http://nexuschat.click
-curl -i http://nexuschat.click/api/ai/health
+```
+
+The lab disables the public AI ingress. To test AI health, run this in one terminal:
+
+```bash
+kubectl -n nexuschat-lab port-forward svc/ai-service 18090:8090
+```
+
+Then, in a second terminal:
+
+```bash
+curl -i http://127.0.0.1:18090/health
 ```
 
 Check NodePorts:
@@ -353,7 +364,7 @@ Workflow `.github/workflows/devsecops-platform.yml` is the direct CD source of t
 - Push to `main`: apply Jaeger/OTel and Kafka UI/RedisInsight manifests, then deploy the app with Helm into `nexuschat-lab`.
 - ArgoCD is not used.
 
-The workflow triggers on `workflow_dispatch`, `pull_request` to any branch, pushes to `main` or `kafka`, and `v*` tags. The Kubernetes deploy job runs only after a successful push to `main`, requires `build-images` and `build-proxy-variants` to pass, and requires a self-hosted runner with labels `[self-hosted, linux, x64, k3s-lab]`.
+The workflow triggers on `workflow_dispatch`, `pull_request` to any branch, pushes to `main` or `kafka`, and `v*` tags. The Kubernetes deploy job runs after the required image jobs succeed for either a push to `main` or a manual `workflow_dispatch`; it requires `build-images` and `build-proxy-variants` to pass, plus a self-hosted runner with labels `[self-hosted, linux, x64, k3s-lab]`.
 
 The deploy runner must have these labels:
 

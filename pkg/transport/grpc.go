@@ -2,13 +2,18 @@ package transport
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"log/slog"
+	"os"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 
+	"github.com/Tuananh165-art/NexusChat/pkg/common"
+	"github.com/Tuananh165-art/NexusChat/pkg/realtime"
 	"github.com/go-kit/kit/circuitbreaker"
 	"github.com/go-kit/kit/endpoint"
 	"github.com/go-kit/kit/sd"
@@ -18,21 +23,53 @@ import (
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/retry"
-	"github.com/Tuananh165-art/NexusChat/pkg/common"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/sony/gobreaker"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 var (
 	ServiceIdHeader string = "Service-Id"
 )
+
+func internalGRPCAuthOK(ctx context.Context, fullMethod string) bool {
+	if strings.HasPrefix(fullMethod, "/grpc.health.v1.Health/") {
+		return true
+	}
+	secret := os.Getenv("NEXUSCHAT_GRPC_SHARED_SECRET")
+	if secret == "" {
+		return false
+	}
+	values := metadata.ValueFromIncomingContext(ctx, "authorization")
+	serviceIDs := metadata.ValueFromIncomingContext(ctx, "service-id")
+	return len(values) > 0 && len(serviceIDs) > 0 && strings.TrimSpace(serviceIDs[0]) != "" && subtle.ConstantTimeCompare([]byte(values[0]), []byte("Bearer "+secret)) == 1
+}
+
+func serviceAuthUnaryInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	if !internalGRPCAuthOK(ctx, info.FullMethod) {
+		return nil, status.Error(codes.Unauthenticated, "invalid internal grpc credentials")
+	}
+	if request, ok := req.(proto.Message); ok {
+		if err := realtime.VerifyProtoAssertion(ctx, request, info.FullMethod); err != nil {
+			return nil, status.Error(codes.Unauthenticated, err.Error())
+		}
+	}
+	return handler(ctx, req)
+}
+
+func serviceAuthStreamInterceptor(srv any, stream grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	if !internalGRPCAuthOK(stream.Context(), info.FullMethod) {
+		return status.Error(codes.Unauthenticated, "invalid internal grpc credentials")
+	}
+	return handler(srv, stream)
+}
 
 func interceptorLogger(l common.GrpcLog) logging.Logger {
 	return logging.LoggerFunc(func(_ context.Context, lvl logging.Level, msg string, fields ...any) {
@@ -113,19 +150,40 @@ func InitializeGrpcServer(name string, logger common.GrpcLog) *grpc.Server {
 	opts = append(opts,
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.ChainStreamInterceptor(
+			serviceAuthStreamInterceptor,
 			srvMetrics.StreamServerInterceptor(grpcprom.WithExemplarFromContext(exemplarFromContext)),
 			logging.StreamServerInterceptor(interceptorLogger(logger), logOpts...),
 			recovery.StreamServerInterceptor(recovery.WithRecoveryHandler(grpcPanicRecoveryHandler)),
 		),
 		grpc.ChainUnaryInterceptor(
+			serviceAuthUnaryInterceptor,
 			srvMetrics.UnaryServerInterceptor(grpcprom.WithExemplarFromContext(exemplarFromContext)),
 			logging.UnaryServerInterceptor(interceptorLogger(logger), logging.WithFieldsFromContext(logTraceID)),
 			recovery.UnaryServerInterceptor(recovery.WithRecoveryHandler(grpcPanicRecoveryHandler)),
 		),
 	)
+	if credentials := realtime.MustServerTransportCredentials(); credentials != nil {
+		opts = append(opts, grpc.Creds(credentials))
+	}
 	grpcSrv := grpc.NewServer(opts...)
 	srvMetrics.InitializeMetrics(grpcSrv)
 	return grpcSrv
+}
+
+func endUserAssertionClientInterceptor(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	request, ok := req.(proto.Message)
+	if !ok {
+		return invoker(ctx, method, req, reply, cc, opts...)
+	}
+	parts := strings.SplitN(strings.TrimPrefix(method, "/"), "/", 2)
+	if len(parts) != 2 {
+		return invoker(ctx, method, req, reply, cc, opts...)
+	}
+	callCtx, err := realtime.ProtoAssertionMetadata(ctx, parts[0], parts[1], request)
+	if err != nil {
+		return status.Error(codes.Unauthenticated, err.Error())
+	}
+	return invoker(callCtx, method, req, reply, cc, opts...)
 }
 
 func InitializeGrpcClient(svcHost string) (*grpc.ClientConn, error) {
@@ -144,7 +202,7 @@ func InitializeGrpcClient(svcHost string) (*grpc.ClientConn, error) {
 	slog.Info("connecting to grpc host: " + svcHost)
 	client, err := grpc.NewClient(
 		fmt.Sprintf("%s:///%s", scheme, svcHost),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(realtime.MustClientTransportCredentials()),
 		grpc.WithStatsHandler(handler),
 		grpc.WithDisableServiceConfig(),
 		grpc.WithDefaultServiceConfig(`{
@@ -156,6 +214,7 @@ func InitializeGrpcClient(svcHost string) (*grpc.ClientConn, error) {
 			PermitWithoutStream: true,             // send pings even without active streams
 		}),
 		grpc.WithChainUnaryInterceptor(
+			endUserAssertionClientInterceptor,
 			retry.UnaryClientInterceptor(retryOpts...),
 		),
 		grpc.WithChainStreamInterceptor(
@@ -183,7 +242,10 @@ func NewGrpcEndpoint(conn *grpc.ClientConn, serviceID, serviceName, method strin
 		encodeGRPCRequest,
 		decodeGRPCResponse,
 		grpcReply,
-		append(options, grpctransport.ClientBefore(grpctransport.SetRequestHeader(ServiceIdHeader, serviceID)))...,
+		append(options, grpctransport.ClientBefore(
+			grpctransport.SetRequestHeader(ServiceIdHeader, serviceID),
+			grpctransport.SetRequestHeader("Authorization", "Bearer "+os.Getenv("NEXUSCHAT_GRPC_SHARED_SECRET")),
+		))...,
 	).Endpoint()
 	ep = circuitbreaker.Gobreaker(gobreaker.NewCircuitBreaker(gobreaker.Settings{
 		Name:    serviceName + "." + method,

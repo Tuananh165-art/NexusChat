@@ -2,6 +2,7 @@ package match
 
 import (
 	"encoding/json"
+	"strconv"
 )
 
 type User struct {
@@ -23,6 +24,9 @@ func (r *MatchResult) Encode() []byte {
 }
 func (r *MatchResult) ToPresenter() *MatchResultPresenter {
 	return &MatchResultPresenter{
+		ChannelID:   strconv.FormatUint(r.ChannelID, 10),
 		AccessToken: r.AccessToken,
+		Kind:        "random",
+		PeerUserID:  strconv.FormatUint(r.PeerID, 10),
 	}
 }

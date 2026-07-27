@@ -11,6 +11,7 @@ import (
 	"github.com/Tuananh165-art/NexusChat/pkg/forwarder"
 	"github.com/Tuananh165-art/NexusChat/pkg/infra"
 	"github.com/Tuananh165-art/NexusChat/pkg/match"
+	"github.com/Tuananh165-art/NexusChat/pkg/notification"
 	"github.com/Tuananh165-art/NexusChat/pkg/uploader"
 	"github.com/Tuananh165-art/NexusChat/pkg/user"
 	"github.com/Tuananh165-art/NexusChat/pkg/web"
@@ -52,6 +53,8 @@ func InitializeChatServer(name string) (*common.Server, error) {
 		infra.NewBrokerRouter,
 
 		infra.NewCassandraSession,
+		notification.NewStore,
+		wire.Bind(new(notification.Enqueuer), new(*notification.Store)),
 
 		chat.NewUserClientConn,
 		chat.NewForwarderClientConn,
@@ -80,7 +83,7 @@ func InitializeChatServer(name string) (*common.Server, error) {
 		wire.Bind(new(chat.UserService), new(*chat.UserServiceImpl)),
 		chat.NewMessageServiceImpl,
 		wire.Bind(new(chat.MessageService), new(*chat.MessageServiceImpl)),
-		chat.NewChannelServiceImpl,
+		chat.NewChannelServiceWithOutbox,
 		wire.Bind(new(chat.ChannelService), new(*chat.ChannelServiceImpl)),
 		chat.NewForwardServiceImpl,
 		wire.Bind(new(chat.ForwardService), new(*chat.ForwardServiceImpl)),
@@ -218,8 +221,12 @@ func InitializeUserServer(name string) (*common.Server, error) {
 		infra.NewRedisClient,
 		infra.NewRedisCacheImpl,
 		wire.Bind(new(infra.RedisCache), new(*infra.RedisCacheImpl)),
+		infra.NewCassandraSession,
 
-		user.NewUserRepoImpl,
+		notification.NewStore,
+		wire.Bind(new(notification.Enqueuer), new(*notification.Store)),
+
+		user.NewUserRepoWithOutbox,
 		wire.Bind(new(user.UserRepo), new(*user.UserRepoImpl)),
 
 		common.NewSonyFlake,

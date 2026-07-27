@@ -40,7 +40,6 @@ export default function ChatMessage({
   onReply,
 }: ChatMessageProps) {
   const [fileUrl, setFileUrl] = useState<string>("");
-  const [seen, setSeen] = useState(message.seen || false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -97,10 +96,6 @@ export default function ChatMessage({
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [isFile, isDeleted, message.payload, accessToken]);
-
-  useEffect(() => {
-    setSeen(message.seen || false);
-  }, [message.seen]);
 
   useEffect(() => {
     if (isEditing && editInputRef.current) {
@@ -467,8 +462,6 @@ export default function ChatMessage({
                 </button>
               ) : isSending ? (
                 <span className="text-[10px] text-text-muted">...</span>
-              ) : seen ? (
-                <CheckCheck className="w-3.5 h-3.5 text-accent-cyan" />
               ) : isDelivered ? (
                 <CheckCheck className="w-3.5 h-3.5 text-text-secondary" />
               ) : (

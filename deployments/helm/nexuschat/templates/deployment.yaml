@@ -30,6 +30,9 @@ spec:
         app.kubernetes.io/instance: {{ $.Release.Name }}
         app.kubernetes.io/component: {{ $name }}
       annotations:
+        # Release revisions force a new ReplicaSet even when a mutable image
+        # alias is reused. Production deployments should still use SHA tags.
+        nexuschat.io/helm-release-revision: {{ $.Release.Revision | quote }}
         prometheus.io/scrape: "true"
         prometheus.io/path: "/metrics"
         prometheus.io/port: "{{ $svc.metricsPort }}"
@@ -75,23 +78,72 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+            {{- if has $name (list "chat" "match" "user" "safety" "discovery" "workspace" "forwarder") }}
+            - name: NEXUSCHAT_GRPC_SHARED_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default "nexuschat-runtime" $.Values.global.grpcSharedSecretSecretName }}
+                  key: NEXUSCHAT_GRPC_SHARED_SECRET
+                  optional: false
+            {{- if $.Values.grpcSecurity.enabled }}
+            - name: NEXUSCHAT_GRPC_ASSERTION_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.grpcSecurity.assertionSecretName }}
+                  key: NEXUSCHAT_GRPC_ASSERTION_KEY_ID
+                  optional: false
+            - name: NEXUSCHAT_GRPC_ASSERTION_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.grpcSecurity.assertionSecretName }}
+                  key: NEXUSCHAT_GRPC_ASSERTION_PRIVATE_KEY
+                  optional: false
+            - name: NEXUSCHAT_GRPC_ASSERTION_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.grpcSecurity.assertionSecretName }}
+                  key: NEXUSCHAT_GRPC_ASSERTION_PUBLIC_KEY
+                  optional: false
+            - name: NEXUSCHAT_GRPC_TLS_ENABLED
+              value: "true"
+            - name: NEXUSCHAT_GRPC_TLS_CA_FILE
+              value: {{ printf "%s/ca.crt" $.Values.grpcSecurity.mountPath | quote }}
+            - name: NEXUSCHAT_GRPC_TLS_CLIENT_CERT_FILE
+              value: {{ printf "%s/client.crt" $.Values.grpcSecurity.mountPath | quote }}
+            - name: NEXUSCHAT_GRPC_TLS_CLIENT_KEY_FILE
+              value: {{ printf "%s/client.key" $.Values.grpcSecurity.mountPath | quote }}
+            - name: NEXUSCHAT_GRPC_TLS_SERVER_CERT_FILE
+              value: {{ printf "%s/server.crt" $.Values.grpcSecurity.mountPath | quote }}
+            - name: NEXUSCHAT_GRPC_TLS_SERVER_KEY_FILE
+              value: {{ printf "%s/server.key" $.Values.grpcSecurity.mountPath | quote }}
+            - name: NEXUSCHAT_GRPC_TLS_SERVER_NAME
+              value: {{ $.Values.grpcSecurity.serverName | quote }}
+            {{- end }}
+            {{- end }}
             {{- range $key, $value := $svc.env }}
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
-          {{- if $.Values.global.envFromSecrets }}
+          {{- $envFromSecrets := default $.Values.global.envFromSecrets $svc.envFromSecrets }}
+          {{- if $envFromSecrets }}
           envFrom:
-            {{- range $.Values.global.envFromSecrets }}
+            {{- range $envFromSecrets }}
             - secretRef:
                 name: {{ . }}
             {{- end }}
           {{- end }}
+          {{- if and $.Values.grpcSecurity.enabled (has $name (list "chat" "match" "user" "safety" "discovery" "workspace" "forwarder")) }}
+          volumeMounts:
+            - name: grpc-tls
+              mountPath: {{ $.Values.grpcSecurity.mountPath | quote }}
+              readOnly: true
+          {{- end }}
           securityContext:
-            allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
+          {{- if or (not (hasKey $svc "probesEnabled")) $svc.probesEnabled }}
           {{- if or $svc.healthPath $svc.readinessPath }}
           livenessProbe:
             httpGet:
@@ -117,7 +169,15 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
           {{- end }}
+          {{- end }}
           resources:
             {{- toYaml $svc.resources | nindent 12 }}
+      {{- if and $.Values.grpcSecurity.enabled (has $name (list "chat" "match" "user" "safety" "discovery" "workspace" "forwarder")) }}
+      volumes:
+        - name: grpc-tls
+          secret:
+            secretName: {{ $.Values.grpcSecurity.tlsSecretName }}
+            optional: false
+      {{- end }}
 {{- end }}
 {{- end }}

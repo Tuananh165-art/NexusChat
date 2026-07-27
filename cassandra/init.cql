@@ -4,6 +4,11 @@ AND durable_writes = true;
 
 USE "NexusChat";
 
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    migration_id text PRIMARY KEY,
+    applied_at timestamp
+);
+
 CREATE TABLE IF NOT EXISTS channels (
     id bigint,
     user_id bigint,
@@ -16,7 +21,6 @@ CREATE TABLE IF NOT EXISTS messages (
     channel_id bigint,
     user_id bigint,
     payload text,
-    seen boolean,
     timestamp timestamp,
     edited_at timestamp,
     deleted_for_all boolean,
@@ -284,3 +288,19 @@ CREATE TABLE IF NOT EXISTS outbox_events (
     PRIMARY KEY ((service, bucket), created_at, event_id)
 ) WITH CLUSTERING ORDER BY (created_at ASC)
 AND default_time_to_live = 604800;
+
+CREATE TABLE IF NOT EXISTS direct_channels_by_pair (
+    user_low bigint,
+    user_high bigint,
+    channel_id bigint,
+    created_at timestamp,
+    PRIMARY KEY ((user_low, user_high))
+);
+
+CREATE TABLE IF NOT EXISTS channel_metadata_by_id (channel_id bigint PRIMARY KEY, kind text, created_at timestamp);
+CREATE TABLE IF NOT EXISTS direct_channels_by_id (channel_id bigint PRIMARY KEY, user_low bigint, user_high bigint, created_at timestamp);
+CREATE TABLE IF NOT EXISTS websocket_tickets_by_hash (ticket_hash text PRIMARY KEY, user_id bigint, channel_id bigint, access_token text, expires_at timestamp);
+CREATE TABLE IF NOT EXISTS message_read_state_by_user (channel_id bigint, user_id bigint, last_read_message_id bigint, updated_at timestamp, PRIMARY KEY ((channel_id), user_id));
+CREATE TABLE IF NOT EXISTS notifications_by_user (user_id bigint, created_at timestamp, notification_id text, type text, actor_id bigint, payload text, read boolean, PRIMARY KEY ((user_id), created_at, notification_id)) WITH CLUSTERING ORDER BY (created_at DESC);
+CREATE TABLE IF NOT EXISTS friendships_by_user (user_id bigint, friend_id bigint, created_at timestamp, PRIMARY KEY (user_id, friend_id));
+CREATE TABLE IF NOT EXISTS friend_requests_by_recipient (recipient_id bigint, sender_id bigint, status text, created_at timestamp, updated_at timestamp, PRIMARY KEY ((recipient_id), sender_id));

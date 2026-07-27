@@ -209,7 +209,7 @@ func (s *Service) routes() *gin.Engine {
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
 	group := engine.Group("/api/discovery")
-	group.Use(realtime.RequireUserID())
+	group.Use(realtime.RequireUserID(realtime.RedisSessionValidator(s.redis)))
 	group.GET("/profile", s.getProfileAPI)
 	group.PUT("/profile", s.putProfileAPI)
 	group.DELETE("/profile", s.deleteProfileAPI)

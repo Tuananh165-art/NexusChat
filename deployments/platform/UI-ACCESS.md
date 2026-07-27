@@ -8,7 +8,7 @@
 | --- | --- |
 | NexusChat via Traefik | `http://nexuschat.click` |
 | NexusChat by node IP | `http://<NODE_IP>` |
-| AI health through app ingress | `http://nexuschat.click/api/ai/health` |
+| AI health (lab port-forward) | `http://127.0.0.1:18090/health` after `kubectl -n nexuschat-lab port-forward svc/ai-service 18090:8090` |
 
 The `nexuschat.click` host is routed by Traefik to the app. The lab profile is HTTP-only; no TLS certificate is created.
 

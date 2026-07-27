@@ -13,16 +13,13 @@ global:
   commonEnv:
     KAFKA_ADDRS: kafka.kafka.svc.cluster.local:9092
     KAFKA_VERSION: "3.6.0"
-    REDIS_ADDRS: redis-redis-cluster-0.redis-redis-cluster-headless.redis.svc.cluster.local:6379,redis-redis-cluster-1.redis-redis-cluster-headless.redis.svc.cluster.local:6379,redis-redis-cluster-2.redis-redis-cluster-headless.redis.svc.cluster.local:6379
     REDIS_EXPIRATIONHOUR: "24"
-    CASSANDRA_HOSTS: cassandra.cassandra.svc.cluster.local
-    CASSANDRA_PORT: "9042"
-    CASSANDRA_KEYSPACE: NexusChat
     OBSERVABILITY_PROMETHEUS_PORT: ""
     OBSERVABILITY_TRACING_OTLPENDPOINT: ""
 
 imageDefaults:
-  pullPolicy: IfNotPresent
+  # Always refresh image aliases in the lab; production releases still use SHA tags.
+  pullPolicy: Always
 
 ingress:
   enabled: true
@@ -96,8 +93,13 @@ services:
   user:
     replicas: 1
     env:
-      USER_AUTH_COOKIE_DOMAIN: nexuschat.click
-      USER_OAUTH_COOKIE_DOMAIN: nexuschat.click
+      USER_AUTH_COOKIE_DOMAIN: ""
+      USER_AUTH_COOKIE_SECURE: "false"
+      USER_AUTH_COOKIE_SAMESITE: lax
+      USER_OAUTH_COOKIE_DOMAIN: ""
+      USER_OAUTH_COOKIE_SECURE: "false"
+      USER_OAUTH_COOKIE_SAMESITE: lax
+      USER_OAUTH_GOOGLE_REDIRECTURL: http://nexuschat.click/api/user/oauth2/google/callback
     resources:
       requests:
         cpu: 25m

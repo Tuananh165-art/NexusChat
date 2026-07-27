@@ -8,10 +8,11 @@ import (
 )
 
 type Client struct {
-	UserID uint64
-	Device string
-	Conn   *websocket.Conn
-	Send   chan []byte
+	UserID    uint64
+	ChannelID uint64
+	Device    string
+	Conn      *websocket.Conn
+	Send      chan []byte
 }
 
 type Hub struct {
@@ -59,6 +60,26 @@ func (h *Hub) Send(userID uint64, value any) bool {
 		}
 	}
 	return delivered
+}
+
+func (h *Hub) BroadcastToChannel(channelID uint64, value any) {
+	body, err := json.Marshal(value)
+	if err != nil {
+		return
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, clients := range h.clients {
+		for client := range clients {
+			if client.ChannelID != channelID {
+				continue
+			}
+			select {
+			case client.Send <- body:
+			default:
+			}
+		}
+	}
 }
 
 func (h *Hub) Broadcast(value any) {

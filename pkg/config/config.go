@@ -17,6 +17,7 @@ type Config struct {
 	Safety        *SafetyConfig        `mapstructure:"safety"`
 	Discovery     *DiscoveryConfig     `mapstructure:"discovery"`
 	Workspace     *WorkspaceConfig     `mapstructure:"workspace"`
+	Notification  *NotificationConfig  `mapstructure:"notification"`
 	Kafka         *KafkaConfig         `mapstructure:"kafka"`
 	Cassandra     *CassandraConfig     `mapstructure:"cassandra"`
 	Redis         *RedisConfig         `mapstructure:"redis"`
@@ -134,9 +135,12 @@ type UploaderConfig struct {
 }
 
 type CookieConfig struct {
-	MaxAge int
-	Path   string
-	Domain string
+	MaxAge   int
+	Path     string
+	Domain   string
+	Secure   bool
+	HttpOnly bool
+	SameSite string
 }
 
 type UserConfig struct {
@@ -219,6 +223,16 @@ type KafkaConfig struct {
 	Version string
 }
 
+type NotificationConfig struct {
+	PollIntervalSecond int64
+	LeaseSecond        int64
+	MaxAttempts        int
+	BaseRetrySecond    int64
+	MaxRetrySecond     int64
+	BatchSize          int
+	WorkerID           string
+}
+
 type CassandraConfig struct {
 	Hosts    string
 	Port     int
@@ -292,14 +306,20 @@ func setDefault() {
 	viper.SetDefault("user.grpc.server.port", "4001")
 	viper.SetDefault("user.oauth.cookie.maxAge", 3600)
 	viper.SetDefault("user.oauth.cookie.path", "/")
-	viper.SetDefault("user.oauth.cookie.domain", "localhost")
+	viper.SetDefault("user.oauth.cookie.domain", "")
+	viper.SetDefault("user.oauth.cookie.secure", false)
+	viper.SetDefault("user.oauth.cookie.httpOnly", true)
+	viper.SetDefault("user.oauth.cookie.sameSite", "lax")
 	viper.SetDefault("user.oauth.google.redirectUrl", "http://localhost/api/user/oauth2/google/callback")
 	viper.SetDefault("user.oauth.google.clientId", "")
 	viper.SetDefault("user.oauth.google.clientSecret", "")
 	viper.SetDefault("user.oauth.google.scopes", "https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/userinfo.profile")
 	viper.SetDefault("user.auth.cookie.maxAge", 86400)
 	viper.SetDefault("user.auth.cookie.path", "/")
-	viper.SetDefault("user.auth.cookie.domain", "localhost")
+	viper.SetDefault("user.auth.cookie.domain", "")
+	viper.SetDefault("user.auth.cookie.secure", false)
+	viper.SetDefault("user.auth.cookie.httpOnly", true)
+	viper.SetDefault("user.auth.cookie.sameSite", "lax")
 
 	viper.SetDefault("forwarder.grpc.server.port", "4002")
 
@@ -324,6 +344,14 @@ func setDefault() {
 	viper.SetDefault("workspace.grpc.client.chat.endpoint", "localhost:4000")
 	viper.SetDefault("workspace.workers", 4)
 	viper.SetDefault("workspace.reminderPollSecond", 15)
+
+	viper.SetDefault("notification.pollIntervalSecond", 2)
+	viper.SetDefault("notification.leaseSecond", 30)
+	viper.SetDefault("notification.maxAttempts", 8)
+	viper.SetDefault("notification.baseRetrySecond", 1)
+	viper.SetDefault("notification.maxRetrySecond", 900)
+	viper.SetDefault("notification.batchSize", 50)
+	viper.SetDefault("notification.workerID", "")
 
 	viper.SetDefault("kafka.addrs", "localhost:9092")
 	viper.SetDefault("kafka.version", "1.0.0")

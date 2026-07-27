@@ -13,6 +13,7 @@ import (
 	"github.com/Tuananh165-art/NexusChat/pkg/forwarder"
 	"github.com/Tuananh165-art/NexusChat/pkg/infra"
 	"github.com/Tuananh165-art/NexusChat/pkg/match"
+	"github.com/Tuananh165-art/NexusChat/pkg/notification"
 	"github.com/Tuananh165-art/NexusChat/pkg/uploader"
 	"github.com/Tuananh165-art/NexusChat/pkg/user"
 	"github.com/Tuananh165-art/NexusChat/pkg/web"
@@ -87,10 +88,11 @@ func InitializeChatServer(name string) (*common.Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	messageServiceImpl := chat.NewMessageServiceImpl(messageRepoCacheImpl, userRepoCacheImpl, idGenerator)
 	channelRepoImpl := chat.NewChannelRepoImpl(session)
 	channelRepoCacheImpl := chat.NewChannelRepoCacheImpl(redisCacheImpl, channelRepoImpl)
-	channelServiceImpl := chat.NewChannelServiceImpl(channelRepoCacheImpl, userRepoCacheImpl, idGenerator)
+	messageServiceImpl := chat.NewMessageServiceImpl(messageRepoCacheImpl, userRepoCacheImpl, channelRepoCacheImpl, idGenerator)
+	notificationStore := notification.NewStore(session)
+	channelServiceImpl := chat.NewChannelServiceWithOutbox(channelRepoCacheImpl, userRepoCacheImpl, idGenerator, notificationStore)
 	forwarderClientConn, err := chat.NewForwarderClientConn(configConfig)
 	if err != nil {
 		return nil, err
@@ -243,7 +245,12 @@ func InitializeUserServer(name string) (*common.Server, error) {
 		return nil, err
 	}
 	redisCacheImpl := infra.NewRedisCacheImpl(universalClient)
-	userRepoImpl := user.NewUserRepoImpl(redisCacheImpl)
+	session, err := infra.NewCassandraSession(configConfig)
+	if err != nil {
+		_ = universalClient.Close()
+		return nil, err
+	}
+	userRepoImpl := user.NewUserRepoWithOutbox(redisCacheImpl, session, notification.NewStore(session))
 	idGenerator, err := common.NewSonyFlake()
 	if err != nil {
 		return nil, err
@@ -256,7 +263,7 @@ func InitializeUserServer(name string) (*common.Server, error) {
 	}
 	grpcServer := user.NewGrpcServer(name, grpcLog, configConfig, userServiceImpl)
 	router := user.NewRouter(httpServer, grpcServer)
-	infraCloser := user.NewInfraCloser()
+	infraCloser := user.NewInfraCloser(session)
 	observabilityInjector := common.NewObservabilityInjector(configConfig)
 	server := common.NewServer(name, router, infraCloser, observabilityInjector)
 	return server, nil

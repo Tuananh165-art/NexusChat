@@ -3,8 +3,10 @@ package chat
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	b64 "encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -31,12 +33,14 @@ var (
 type UserRepo interface {
 	AddUserToChannel(ctx context.Context, channelID uint64, userID uint64) error
 	GetUserByID(ctx context.Context, userID uint64) (*User, error)
+	GetUserIDBySession(ctx context.Context, sid string) (uint64, error)
 	GetChannelUserIDs(ctx context.Context, channelID uint64) ([]uint64, error)
 }
 
 type MessageRepo interface {
 	InsertMessage(ctx context.Context, msg *Message) error
-	MarkMessageSeen(ctx context.Context, channelID, messageID uint64) error
+	MarkMessageRead(ctx context.Context, channelID, userID, messageID uint64) error
+	GetLastReadMessageID(ctx context.Context, channelID, userID uint64) (uint64, error)
 	PublishMessage(ctx context.Context, msg *Message) error
 	ListMessages(ctx context.Context, channelID uint64, pageStateBase64 string) ([]*Message, string, error)
 	EditMessage(ctx context.Context, channelID, messageID uint64, newPayload string, editedAt int64) error
@@ -54,12 +58,20 @@ type MessageRepo interface {
 
 type ChannelRepo interface {
 	CreateChannel(ctx context.Context, channelID uint64) (*Channel, error)
+	SetChannelKind(ctx context.Context, channelID uint64, kind string) error
+	GetChannelKind(ctx context.Context, channelID uint64) (string, error)
+	GetDirectPeer(ctx context.Context, channelID, userID uint64) (uint64, error)
 	DeleteChannel(ctx context.Context, channelID uint64) error
 	AssignRole(ctx context.Context, channelID, userID uint64, role Role) error
 	GetRole(ctx context.Context, channelID, userID uint64) (Role, error)
 	CreateRoom(ctx context.Context, room *Room) error
+	UpdateRoomAvatar(ctx context.Context, channelID uint64, avatar string) error
 	GetRoom(ctx context.Context, channelID uint64) (*Room, error)
 	GetRoomByInviteCode(ctx context.Context, inviteCode string) (*Room, error)
+	GetDirectChannel(ctx context.Context, user1, user2 uint64) (*Channel, error)
+	CreateDirectChannel(ctx context.Context, channelID, user1, user2 uint64) error
+	IssueWebSocketTicket(ctx context.Context, userID, channelID uint64, accessToken string) (string, error)
+	ConsumeWebSocketTicket(ctx context.Context, ticket string) (uint64, uint64, string, error)
 	ListRoomsByUser(ctx context.Context, userID uint64) ([]Room, error)
 	AddRoomMember(ctx context.Context, room *Room, userID uint64, role Role) error
 	RemoveRoomMember(ctx context.Context, channelID, userID uint64) error
@@ -71,8 +83,9 @@ type ForwardRepo interface {
 }
 
 type UserRepoImpl struct {
-	s       *gocql.Session
-	getUser endpoint.Endpoint
+	s                *gocql.Session
+	getUser          endpoint.Endpoint
+	getUserIDSession endpoint.Endpoint
 }
 
 func NewUserRepoImpl(s *gocql.Session, userConn *UserClientConn) *UserRepoImpl {
@@ -85,6 +98,13 @@ func NewUserRepoImpl(s *gocql.Session, userConn *UserClientConn) *UserRepoImpl {
 			"GetUser",
 			&userpb.GetUserResponse{},
 		),
+		getUserIDSession: transport.NewGrpcEndpoint(
+			userConn.Conn,
+			"user",
+			"user.UserService",
+			"GetUserIdBySession",
+			&userpb.GetUserIdBySessionResponse{},
+		),
 	}
 }
 func (repo *UserRepoImpl) AddUserToChannel(ctx context.Context, channelID uint64, userID uint64) error {
@@ -94,6 +114,14 @@ func (repo *UserRepoImpl) AddUserToChannel(ctx context.Context, channelID uint64
 	}
 	return nil
 }
+func (repo *UserRepoImpl) GetUserIDBySession(ctx context.Context, sid string) (uint64, error) {
+	res, err := repo.getUserIDSession(ctx, &userpb.GetUserIdBySessionRequest{Sid: sid})
+	if err != nil {
+		return 0, err
+	}
+	return res.(*userpb.GetUserIdBySessionResponse).UserId, nil
+}
+
 func (repo *UserRepoImpl) GetUserByID(ctx context.Context, userID uint64) (*User, error) {
 	res, err := repo.getUser(ctx, &userpb.GetUserRequest{
 		UserId: userID,
@@ -148,26 +176,45 @@ func (repo *MessageRepoImpl) InsertMessage(ctx context.Context, msg *Message) er
 	if messageNum >= repo.maxMessages {
 		return ErrExceedMessageNumLimits
 	}
-	if err := repo.s.Query("INSERT INTO messages (id, event, channel_id, user_id, payload, seen, timestamp, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+	if err := repo.s.Query("INSERT INTO messages (id, event, channel_id, user_id, payload, timestamp, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
 		msg.MessageID,
 		msg.Event,
 		msg.ChannelID,
 		msg.UserID,
 		msg.Payload,
-		false,
 		msg.Time,
 		msg.ParentID).WithContext(ctx).Exec(); err != nil {
 		return err
 	}
 	return repo.s.Query("UPDATE chanmsg_counters SET msgnum = msgnum + 1 WHERE channel_id = ?", msg.ChannelID).WithContext(ctx).Exec()
 }
-func (repo *MessageRepoImpl) MarkMessageSeen(ctx context.Context, channelID, messageID uint64) error {
-	if err := repo.s.Query("UPDATE messages SET seen = ? WHERE channel_id = ? AND id = ?", true, channelID, messageID).
-		WithContext(ctx).Idempotent(true).Exec(); err != nil {
+func (repo *MessageRepoImpl) MarkMessageRead(ctx context.Context, channelID, userID, messageID uint64) error {
+	var existing uint64
+	if err := repo.s.Query("SELECT id FROM messages WHERE channel_id = ? AND id = ? LIMIT 1", channelID, messageID).WithContext(ctx).Scan(&existing); err != nil {
 		return err
 	}
-	return nil
+	// Seed a user's first receipt explicitly. A conditional comparison against
+	// a missing row is not portable across Cassandra versions.
+	applied, err := repo.s.Query("INSERT INTO message_read_state_by_user (channel_id, user_id, last_read_message_id, updated_at) VALUES (?, ?, ?, ?) IF NOT EXISTS", channelID, userID, messageID, time.Now().UTC()).WithContext(ctx).MapScanCAS(map[string]interface{}{})
+	if err != nil {
+		return err
+	}
+	if applied {
+		return nil
+	}
+	_, err = repo.s.Query("UPDATE message_read_state_by_user SET last_read_message_id = ?, updated_at = ? WHERE channel_id = ? AND user_id = ? IF last_read_message_id < ?", messageID, time.Now().UTC(), channelID, userID, messageID).WithContext(ctx).MapScanCAS(map[string]interface{}{})
+	return err
 }
+
+func (repo *MessageRepoImpl) GetLastReadMessageID(ctx context.Context, channelID, userID uint64) (uint64, error) {
+	var messageID uint64
+	err := repo.s.Query("SELECT last_read_message_id FROM message_read_state_by_user WHERE channel_id = ? AND user_id = ? LIMIT 1", channelID, userID).WithContext(ctx).Scan(&messageID)
+	if err == gocql.ErrNotFound {
+		return 0, nil
+	}
+	return messageID, err
+}
+
 func (repo *MessageRepoImpl) PublishMessage(ctx context.Context, msg *Message) error {
 	if err := repo.p.Publish(MessagePubTopic, message.NewMessage(
 		watermill.NewUUID(),
@@ -198,7 +245,7 @@ func (repo *MessageRepoImpl) ListMessages(ctx context.Context, channelID uint64,
 	if err != nil {
 		return nil, "", err
 	}
-	iter := repo.s.Query(`SELECT id, event, channel_id, user_id, payload, seen, timestamp, edited_at, deleted_for_all, deleted_by, parent_id FROM messages WHERE channel_id = ?`, channelID).
+	iter := repo.s.Query(`SELECT id, event, channel_id, user_id, payload, timestamp, edited_at, deleted_for_all, deleted_by, parent_id FROM messages WHERE channel_id = ?`, channelID).
 		WithContext(ctx).Idempotent(true).PageSize(repo.pagination).PageState(pageState).Iter()
 	nextPageStateBase64 := b64.URLEncoding.EncodeToString(iter.PageState())
 	scanner := iter.Scanner()
@@ -211,7 +258,6 @@ func (repo *MessageRepoImpl) ListMessages(ctx context.Context, channelID uint64,
 			&message.ChannelID,
 			&message.UserID,
 			&message.Payload,
-			&message.Seen,
 			&message.Time,
 			&message.EditedAt,
 			&message.DeletedForAll,
@@ -257,14 +303,13 @@ func (repo *MessageRepoImpl) DeleteMessageForAll(ctx context.Context, channelID,
 }
 func (repo *MessageRepoImpl) GetMessage(ctx context.Context, channelID, messageID uint64) (*Message, error) {
 	var msg Message
-	err := repo.s.Query("SELECT id, event, channel_id, user_id, payload, seen, timestamp, edited_at, deleted_for_all, deleted_by FROM messages WHERE channel_id = ? AND id = ? LIMIT 1",
+	err := repo.s.Query("SELECT id, event, channel_id, user_id, payload, timestamp, edited_at, deleted_for_all, deleted_by FROM messages WHERE channel_id = ? AND id = ? LIMIT 1",
 		channelID, messageID).WithContext(ctx).Idempotent(true).Scan(
 		&msg.MessageID,
 		&msg.Event,
 		&msg.ChannelID,
 		&msg.UserID,
 		&msg.Payload,
-		&msg.Seen,
 		&msg.Time,
 		&msg.EditedAt,
 		&msg.DeletedForAll,
@@ -348,13 +393,13 @@ func (repo *MessageRepoImpl) GetPinnedMessages(ctx context.Context, channelID ui
 }
 func (repo *MessageRepoImpl) SearchMessages(ctx context.Context, channelID uint64, query string, limit int) ([]*Message, error) {
 	var messages []*Message
-	iter := repo.s.Query("SELECT id, event, channel_id, user_id, payload, seen, timestamp, edited_at, deleted_for_all, deleted_by, parent_id FROM messages WHERE channel_id = ? ALLOW FILTERING", channelID).
+	iter := repo.s.Query("SELECT id, event, channel_id, user_id, payload, timestamp, edited_at, deleted_for_all, deleted_by, parent_id FROM messages WHERE channel_id = ? ALLOW FILTERING", channelID).
 		WithContext(ctx).Idempotent(true).Iter()
 	scanner := iter.Scanner()
 	count := 0
 	for scanner.Next() && count < limit {
 		var msg Message
-		if err := scanner.Scan(&msg.MessageID, &msg.Event, &msg.ChannelID, &msg.UserID, &msg.Payload, &msg.Seen, &msg.Time, &msg.EditedAt, &msg.DeletedForAll, &msg.DeletedBy, &msg.ParentID); err != nil {
+		if err := scanner.Scan(&msg.MessageID, &msg.Event, &msg.ChannelID, &msg.UserID, &msg.Payload, &msg.Time, &msg.EditedAt, &msg.DeletedForAll, &msg.DeletedBy, &msg.ParentID); err != nil {
 			return nil, err
 		}
 		if msg.DeletedForAll {
@@ -375,13 +420,13 @@ func (repo *MessageRepoImpl) SearchMessages(ctx context.Context, channelID uint6
 }
 func (repo *MessageRepoImpl) ListMediaMessages(ctx context.Context, channelID uint64, mediaType string, limit int) ([]*Message, error) {
 	var messages []*Message
-	iter := repo.s.Query("SELECT id, event, channel_id, user_id, payload, seen, timestamp, edited_at, deleted_for_all, deleted_by, parent_id FROM messages WHERE channel_id = ? ALLOW FILTERING", channelID).
+	iter := repo.s.Query("SELECT id, event, channel_id, user_id, payload, timestamp, edited_at, deleted_for_all, deleted_by, parent_id FROM messages WHERE channel_id = ? ALLOW FILTERING", channelID).
 		WithContext(ctx).Idempotent(true).Iter()
 	scanner := iter.Scanner()
 	count := 0
 	for scanner.Next() && count < limit {
 		var msg Message
-		if err := scanner.Scan(&msg.MessageID, &msg.Event, &msg.ChannelID, &msg.UserID, &msg.Payload, &msg.Seen, &msg.Time, &msg.EditedAt, &msg.DeletedForAll, &msg.DeletedBy, &msg.ParentID); err != nil {
+		if err := scanner.Scan(&msg.MessageID, &msg.Event, &msg.ChannelID, &msg.UserID, &msg.Payload, &msg.Time, &msg.EditedAt, &msg.DeletedForAll, &msg.DeletedBy, &msg.ParentID); err != nil {
 			return nil, err
 		}
 		if msg.DeletedForAll || msg.Event != EventFile {
@@ -449,11 +494,55 @@ func (repo *ChannelRepoImpl) CreateChannel(ctx context.Context, channelID uint64
 		AccessToken: accessToken,
 	}, nil
 }
+func (repo *ChannelRepoImpl) SetChannelKind(ctx context.Context, channelID uint64, kind string) error {
+	return repo.s.Query("INSERT INTO channel_metadata_by_id (channel_id, kind, created_at) VALUES (?, ?, ?)", channelID, kind, time.Now().UTC()).WithContext(ctx).Exec()
+}
+func (repo *ChannelRepoImpl) GetChannelKind(ctx context.Context, channelID uint64) (string, error) {
+	var kind string
+	err := repo.s.Query("SELECT kind FROM channel_metadata_by_id WHERE channel_id = ? LIMIT 1", channelID).WithContext(ctx).Scan(&kind)
+	if err == nil {
+		return kind, nil
+	}
+	if !errors.Is(err, gocql.ErrNotFound) {
+		return "", err
+	}
+
+	// Legacy rooms predate channel_metadata_by_id. A room row is authoritative
+	// evidence that this channel is a group; backfill metadata so subsequent
+	// WebSocket and message authorization checks use the normal fast path.
+	var roomID uint64
+	if roomErr := repo.s.Query("SELECT channel_id FROM chat_rooms_by_id WHERE channel_id = ? LIMIT 1", channelID).WithContext(ctx).Scan(&roomID); roomErr != nil {
+		return "", err
+	}
+	if backfillErr := repo.SetChannelKind(ctx, channelID, "group"); backfillErr != nil {
+		return "", backfillErr
+	}
+	return "group", nil
+}
+func (repo *ChannelRepoImpl) GetDirectPeer(ctx context.Context, channelID, userID uint64) (uint64, error) {
+	var low, high uint64
+	if err := repo.s.Query("SELECT user_low, user_high FROM direct_channels_by_id WHERE channel_id = ? LIMIT 1", channelID).WithContext(ctx).Scan(&low, &high); err != nil {
+		return 0, err
+	}
+	if userID == low {
+		return high, nil
+	}
+	if userID == high {
+		return low, nil
+	}
+	return 0, gocql.ErrNotFound
+}
+
 func (repo *ChannelRepoImpl) DeleteChannel(ctx context.Context, channelID uint64) error {
-	if err := repo.s.Query("DELETE FROM channels WHERE id = ?", channelID).
-		WithContext(ctx).Exec(); err != nil {
+	if err := repo.s.Query("DELETE FROM channels WHERE id = ?", channelID).WithContext(ctx).Exec(); err != nil {
 		return err
 	}
+	var low, high uint64
+	if err := repo.s.Query("SELECT user_low, user_high FROM direct_channels_by_id WHERE channel_id = ? LIMIT 1", channelID).WithContext(ctx).Scan(&low, &high); err == nil {
+		_ = repo.s.Query("DELETE FROM direct_channels_by_pair WHERE user_low = ? AND user_high = ?", low, high).WithContext(ctx).Exec()
+	}
+	_ = repo.s.Query("DELETE FROM direct_channels_by_id WHERE channel_id = ?", channelID).WithContext(ctx).Exec()
+	_ = repo.s.Query("DELETE FROM channel_metadata_by_id WHERE channel_id = ?", channelID).WithContext(ctx).Exec()
 	return nil
 }
 func (repo *ChannelRepoImpl) AssignRole(ctx context.Context, channelID, userID uint64, role Role) error {
@@ -487,8 +576,8 @@ func (repo *ChannelRepoImpl) CreateRoom(ctx context.Context, room *Room) error {
 		}
 		room.InviteCode = code
 	}
-	if err := repo.s.Query("INSERT INTO chat_rooms_by_id (channel_id, name, owner_id, invite_code, member_count, archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		room.ChannelID, room.Name, room.OwnerID, room.InviteCode, room.MemberCount, false, room.CreatedAt, room.UpdatedAt).WithContext(ctx).Exec(); err != nil {
+	if err := repo.s.Query("INSERT INTO chat_rooms_by_id (channel_id, name, avatar, owner_id, invite_code, member_count, archived, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		room.ChannelID, room.Name, room.Avatar, room.OwnerID, room.InviteCode, room.MemberCount, false, room.CreatedAt, room.UpdatedAt).WithContext(ctx).Exec(); err != nil {
 		return err
 	}
 	if err := repo.s.Query("INSERT INTO chat_room_invites (invite_code, channel_id, created_by, created_at) VALUES (?, ?, ?, ?)",
@@ -501,8 +590,8 @@ func (repo *ChannelRepoImpl) CreateRoom(ctx context.Context, room *Room) error {
 func (repo *ChannelRepoImpl) GetRoom(ctx context.Context, channelID uint64) (*Room, error) {
 	var room Room
 	var archived bool
-	err := repo.s.Query("SELECT channel_id, name, owner_id, invite_code, member_count, created_at, updated_at, archived FROM chat_rooms_by_id WHERE channel_id = ? LIMIT 1",
-		channelID).WithContext(ctx).Idempotent(true).Scan(&room.ChannelID, &room.Name, &room.OwnerID, &room.InviteCode, &room.MemberCount, &room.CreatedAt, &room.UpdatedAt, &archived)
+	err := repo.s.Query("SELECT channel_id, name, avatar, owner_id, invite_code, member_count, created_at, updated_at, archived FROM chat_rooms_by_id WHERE channel_id = ? LIMIT 1",
+		channelID).WithContext(ctx).Idempotent(true).Scan(&room.ChannelID, &room.Name, &room.Avatar, &room.OwnerID, &room.InviteCode, &room.MemberCount, &room.CreatedAt, &room.UpdatedAt, &archived)
 	if err != nil {
 		return nil, err
 	}
@@ -512,6 +601,10 @@ func (repo *ChannelRepoImpl) GetRoom(ctx context.Context, channelID uint64) (*Ro
 	return &room, nil
 }
 
+func (repo *ChannelRepoImpl) UpdateRoomAvatar(ctx context.Context, channelID uint64, avatar string) error {
+	return repo.s.Query("UPDATE chat_rooms_by_id SET avatar = ?, updated_at = ? WHERE channel_id = ?", avatar, time.Now().UTC(), channelID).WithContext(ctx).Exec()
+}
+
 func (repo *ChannelRepoImpl) GetRoomByInviteCode(ctx context.Context, inviteCode string) (*Room, error) {
 	var channelID uint64
 	if err := repo.s.Query("SELECT channel_id FROM chat_room_invites WHERE invite_code = ? LIMIT 1", inviteCode).
@@ -519,6 +612,84 @@ func (repo *ChannelRepoImpl) GetRoomByInviteCode(ctx context.Context, inviteCode
 		return nil, err
 	}
 	return repo.GetRoom(ctx, channelID)
+}
+
+func (repo *ChannelRepoImpl) GetDirectChannel(ctx context.Context, user1, user2 uint64) (*Channel, error) {
+	low, high := canonicalPair(user1, user2)
+	var channelID uint64
+	if err := repo.s.Query("SELECT channel_id FROM direct_channels_by_pair WHERE user_low = ? AND user_high = ? LIMIT 1", low, high).
+		WithContext(ctx).Idempotent(true).Scan(&channelID); err != nil {
+		return nil, err
+	}
+	token, err := common.NewJWT(channelID)
+	if err != nil {
+		return nil, err
+	}
+	// Backfill metadata for channels created before the channel metadata tables
+	// existed. This makes legacy direct tokens enforceable on their next open.
+	_ = repo.s.Query("INSERT INTO direct_channels_by_id (channel_id, user_low, user_high, created_at) VALUES (?, ?, ?, ?)", channelID, low, high, time.Now().UTC()).WithContext(ctx).Exec()
+	return &Channel{ID: channelID, AccessToken: token}, nil
+}
+
+func (repo *ChannelRepoImpl) IssueWebSocketTicket(ctx context.Context, userID, channelID uint64, accessToken string) (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	ticket := b64.RawURLEncoding.EncodeToString(buf)
+	hash := sha256.Sum256([]byte(ticket))
+	ticketHash := b64.RawURLEncoding.EncodeToString(hash[:])
+	expiresAt := time.Now().UTC().Add(60 * time.Second)
+	if err := repo.s.Query("INSERT INTO websocket_tickets_by_hash (ticket_hash, user_id, channel_id, access_token, expires_at) VALUES (?, ?, ?, ?, ?) USING TTL 60", ticketHash, userID, channelID, accessToken, expiresAt).WithContext(ctx).Exec(); err != nil {
+		return "", err
+	}
+	return ticket, nil
+}
+
+func (repo *ChannelRepoImpl) ConsumeWebSocketTicket(ctx context.Context, ticket string) (uint64, uint64, string, error) {
+	if strings.TrimSpace(ticket) == "" {
+		return 0, 0, "", gocql.ErrNotFound
+	}
+	hash := sha256.Sum256([]byte(ticket))
+	ticketHash := b64.RawURLEncoding.EncodeToString(hash[:])
+	var userID, channelID uint64
+	var accessToken string
+	if err := repo.s.Query("SELECT user_id, channel_id, access_token FROM websocket_tickets_by_hash WHERE ticket_hash = ? LIMIT 1", ticketHash).WithContext(ctx).Scan(&userID, &channelID, &accessToken); err != nil {
+		return 0, 0, "", err
+	}
+	values := map[string]interface{}{}
+	applied, err := repo.s.Query("DELETE FROM websocket_tickets_by_hash WHERE ticket_hash = ? IF user_id = ? AND channel_id = ? AND access_token = ?", ticketHash, userID, channelID, accessToken).WithContext(ctx).MapScanCAS(values)
+	if err != nil {
+		return 0, 0, "", err
+	}
+	if !applied {
+		return 0, 0, "", gocql.ErrNotFound
+	}
+	return userID, channelID, accessToken, nil
+}
+
+func (repo *ChannelRepoImpl) CreateDirectChannel(ctx context.Context, channelID, user1, user2 uint64) error {
+	low, high := canonicalPair(user1, user2)
+	values := map[string]interface{}{
+		"user_low": low, "user_high": high, "channel_id": channelID, "created_at": time.Now().UTC(),
+	}
+	applied, err := repo.s.Query("INSERT INTO direct_channels_by_pair (user_low, user_high, channel_id, created_at) VALUES (?, ?, ?, ?) IF NOT EXISTS",
+		low, high, channelID, values["created_at"]).WithContext(ctx).MapScanCAS(values)
+	if err != nil {
+		return err
+	}
+	if !applied {
+		return ErrDirectChannelExists
+	}
+	return repo.s.Query("INSERT INTO direct_channels_by_id (channel_id, user_low, user_high, created_at) VALUES (?, ?, ?, ?)",
+		channelID, low, high, values["created_at"]).WithContext(ctx).Exec()
+}
+
+func canonicalPair(user1, user2 uint64) (uint64, uint64) {
+	if user1 < user2 {
+		return user1, user2
+	}
+	return user2, user1
 }
 
 func (repo *ChannelRepoImpl) ListRoomsByUser(ctx context.Context, userID uint64) ([]Room, error) {

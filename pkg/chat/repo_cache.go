@@ -15,7 +15,9 @@ var (
 
 type UserRepoCache interface {
 	AddUserToChannel(ctx context.Context, channelID uint64, userID uint64) error
+	AreFriends(ctx context.Context, userID, peerID uint64) (bool, error)
 	GetUserByID(ctx context.Context, userID uint64) (*User, error)
+	GetUserIDBySession(ctx context.Context, sid string) (uint64, error)
 	IsChannelUserExist(ctx context.Context, channelID, userID uint64) (bool, error)
 	GetChannelUserIDs(ctx context.Context, channelID uint64) ([]uint64, error)
 	AddOnlineUser(ctx context.Context, channelID uint64, userID uint64) error
@@ -25,7 +27,8 @@ type UserRepoCache interface {
 
 type MessageRepoCache interface {
 	InsertMessage(ctx context.Context, msg *Message) error
-	MarkMessageSeen(ctx context.Context, channelID, messageID uint64) error
+	MarkMessageRead(ctx context.Context, channelID, userID, messageID uint64) error
+	GetLastReadMessageID(ctx context.Context, channelID, userID uint64) (uint64, error)
 	PublishMessage(ctx context.Context, msg *Message) error
 	ListMessages(ctx context.Context, channelID uint64, pageStateStr string) ([]*Message, string, error)
 	EditMessage(ctx context.Context, channelID, messageID uint64, newPayload string, editedAt int64) error
@@ -43,12 +46,20 @@ type MessageRepoCache interface {
 
 type ChannelRepoCache interface {
 	CreateChannel(ctx context.Context, channelID uint64) (*Channel, error)
+	SetChannelKind(ctx context.Context, channelID uint64, kind string) error
+	GetChannelKind(ctx context.Context, channelID uint64) (string, error)
+	GetDirectPeer(ctx context.Context, channelID, userID uint64) (uint64, error)
 	DeleteChannel(ctx context.Context, channelID uint64) error
 	AssignRole(ctx context.Context, channelID, userID uint64, role Role) error
 	GetRole(ctx context.Context, channelID, userID uint64) (Role, error)
 	CreateRoom(ctx context.Context, room *Room) error
+	UpdateRoomAvatar(ctx context.Context, channelID uint64, avatar string) error
 	GetRoom(ctx context.Context, channelID uint64) (*Room, error)
 	GetRoomByInviteCode(ctx context.Context, inviteCode string) (*Room, error)
+	GetDirectChannel(ctx context.Context, user1, user2 uint64) (*Channel, error)
+	CreateDirectChannel(ctx context.Context, channelID, user1, user2 uint64) error
+	IssueWebSocketTicket(ctx context.Context, userID, channelID uint64, accessToken string) (string, error)
+	ConsumeWebSocketTicket(ctx context.Context, ticket string) (uint64, uint64, string, error)
 	ListRoomsByUser(ctx context.Context, userID uint64) ([]Room, error)
 	AddRoomMember(ctx context.Context, room *Room, userID uint64, role Role) error
 	RemoveRoomMember(ctx context.Context, channelID, userID uint64) error
@@ -64,13 +75,24 @@ func NewUserRepoCacheImpl(r infra.RedisCache, userRepo UserRepo) *UserRepoCacheI
 }
 func (cache *UserRepoCacheImpl) AddUserToChannel(ctx context.Context, channelID uint64, userID uint64) error {
 	if err := cache.userRepo.AddUserToChannel(ctx, channelID, userID); err != nil {
-		return nil
+		return err
 	}
 	key := constructKey(channelUsersPrefix, channelID)
 	return cache.r.HSet(ctx, key, strconv.FormatUint(userID, 10), 1)
 }
+func (cache *UserRepoCacheImpl) AreFriends(ctx context.Context, userID, peerID uint64) (bool, error) {
+	friends, err := cache.r.HGetAll(ctx, common.Join("rc:friendship", ":", strconv.FormatUint(userID, 10)))
+	if err != nil {
+		return false, err
+	}
+	_, exists := friends[strconv.FormatUint(peerID, 10)]
+	return exists, nil
+}
 func (cache *UserRepoCacheImpl) GetUserByID(ctx context.Context, userID uint64) (*User, error) {
 	return cache.userRepo.GetUserByID(ctx, userID)
+}
+func (cache *UserRepoCacheImpl) GetUserIDBySession(ctx context.Context, sid string) (uint64, error) {
+	return cache.userRepo.GetUserIDBySession(ctx, sid)
 }
 func (cache *UserRepoCacheImpl) IsChannelUserExist(ctx context.Context, channelID, userID uint64) (bool, error) {
 	key := constructKey(channelUsersPrefix, channelID)
@@ -81,10 +103,32 @@ func (cache *UserRepoCacheImpl) IsChannelUserExist(ctx context.Context, channelI
 		return false, err
 	}
 	if channelExists {
-		if !userExists {
-			return false, nil
+		if userExists {
+			return true, nil
 		}
-		return true, nil
+		// Redis can contain a stale partial membership hash after a room was
+		// joined by an older application version. Refresh from Cassandra before
+		// denying the WebSocket/ticket request.
+		channelUserIDs, err := cache.userRepo.GetChannelUserIDs(ctx, channelID)
+		if err != nil {
+			return false, err
+		}
+		args := make([]interface{}, 0, len(channelUserIDs)*2)
+		channelUserExist := false
+		for _, channelUserID := range channelUserIDs {
+			if userID == channelUserID {
+				channelUserExist = true
+			}
+			args = append(args, channelUserID, 1)
+		}
+		if len(args) > 0 {
+			if err := cache.r.HSet(ctx, key, args...); err != nil {
+				return channelUserExist, err
+			}
+		} else {
+			_ = cache.r.Delete(ctx, key)
+		}
+		return channelUserExist, nil
 	}
 
 	channelUserIDs, err := cache.userRepo.GetChannelUserIDs(ctx, channelID)
@@ -99,8 +143,10 @@ func (cache *UserRepoCacheImpl) IsChannelUserExist(ctx context.Context, channelI
 		}
 		args = append(args, channelUserID, 1)
 	}
-	if err := cache.r.HSet(ctx, key, args...); err != nil {
-		return channelUserExist, err
+	if len(args) > 0 {
+		if err := cache.r.HSet(ctx, key, args...); err != nil {
+			return channelUserExist, err
+		}
 	}
 	return channelUserExist, nil
 }
@@ -137,12 +183,20 @@ func (cache *UserRepoCacheImpl) GetChannelUserIDs(ctx context.Context, channelID
 }
 func (cache *UserRepoCacheImpl) AddOnlineUser(ctx context.Context, channelID uint64, userID uint64) error {
 	key := constructKey(onlineUsersPrefix, channelID)
-	return cache.r.HSet(ctx, key, strconv.FormatUint(userID, 10), 1)
+	_, err := cache.r.HIncrBy(ctx, key, strconv.FormatUint(userID, 10), 1)
+	return err
 }
 func (cache *UserRepoCacheImpl) DeleteOnlineUser(ctx context.Context, channelID, userID uint64) error {
 	key := constructKey(onlineUsersPrefix, channelID)
 	userKey := strconv.FormatUint(userID, 10)
-	return cache.r.HDel(ctx, key, userKey)
+	count, err := cache.r.HIncrBy(ctx, key, userKey, -1)
+	if err != nil {
+		return err
+	}
+	if count <= 0 {
+		return cache.r.HDel(ctx, key, userKey)
+	}
+	return nil
 }
 func (cache *UserRepoCacheImpl) GetOnlineUserIDs(ctx context.Context, channelID uint64) ([]uint64, error) {
 	key := constructKey(onlineUsersPrefix, channelID)
@@ -172,8 +226,11 @@ func NewMessageRepoCacheImpl(messageRepo MessageRepo) *MessageRepoCacheImpl {
 func (cache *MessageRepoCacheImpl) InsertMessage(ctx context.Context, msg *Message) error {
 	return cache.messageRepo.InsertMessage(ctx, msg)
 }
-func (cache *MessageRepoCacheImpl) MarkMessageSeen(ctx context.Context, channelID, messageID uint64) error {
-	return cache.messageRepo.MarkMessageSeen(ctx, channelID, messageID)
+func (cache *MessageRepoCacheImpl) MarkMessageRead(ctx context.Context, channelID, userID, messageID uint64) error {
+	return cache.messageRepo.MarkMessageRead(ctx, channelID, userID, messageID)
+}
+func (cache *MessageRepoCacheImpl) GetLastReadMessageID(ctx context.Context, channelID, userID uint64) (uint64, error) {
+	return cache.messageRepo.GetLastReadMessageID(ctx, channelID, userID)
 }
 func (cache *MessageRepoCacheImpl) PublishMessage(ctx context.Context, msg *Message) error {
 	return cache.messageRepo.PublishMessage(ctx, msg)
@@ -227,6 +284,15 @@ func NewChannelRepoCacheImpl(r infra.RedisCache, channelRepo ChannelRepo) *Chann
 func (cache *ChannelRepoCacheImpl) CreateChannel(ctx context.Context, channelID uint64) (*Channel, error) {
 	return cache.channelRepo.CreateChannel(ctx, channelID)
 }
+func (cache *ChannelRepoCacheImpl) SetChannelKind(ctx context.Context, channelID uint64, kind string) error {
+	return cache.channelRepo.SetChannelKind(ctx, channelID, kind)
+}
+func (cache *ChannelRepoCacheImpl) GetChannelKind(ctx context.Context, channelID uint64) (string, error) {
+	return cache.channelRepo.GetChannelKind(ctx, channelID)
+}
+func (cache *ChannelRepoCacheImpl) GetDirectPeer(ctx context.Context, channelID, userID uint64) (uint64, error) {
+	return cache.channelRepo.GetDirectPeer(ctx, channelID, userID)
+}
 func (cache *ChannelRepoCacheImpl) DeleteChannel(ctx context.Context, channelID uint64) error {
 	if err := cache.channelRepo.DeleteChannel(ctx, channelID); err != nil {
 		return err
@@ -259,11 +325,26 @@ func (cache *ChannelRepoCacheImpl) CreateRoom(ctx context.Context, room *Room) e
 	}
 	return cache.r.HSet(ctx, constructKey(channelUsersPrefix, room.ChannelID), strconv.FormatUint(room.OwnerID, 10), 1)
 }
+func (cache *ChannelRepoCacheImpl) UpdateRoomAvatar(ctx context.Context, channelID uint64, avatar string) error {
+	return cache.channelRepo.UpdateRoomAvatar(ctx, channelID, avatar)
+}
 func (cache *ChannelRepoCacheImpl) GetRoom(ctx context.Context, channelID uint64) (*Room, error) {
 	return cache.channelRepo.GetRoom(ctx, channelID)
 }
 func (cache *ChannelRepoCacheImpl) GetRoomByInviteCode(ctx context.Context, inviteCode string) (*Room, error) {
 	return cache.channelRepo.GetRoomByInviteCode(ctx, inviteCode)
+}
+func (cache *ChannelRepoCacheImpl) GetDirectChannel(ctx context.Context, user1, user2 uint64) (*Channel, error) {
+	return cache.channelRepo.GetDirectChannel(ctx, user1, user2)
+}
+func (cache *ChannelRepoCacheImpl) IssueWebSocketTicket(ctx context.Context, userID, channelID uint64, accessToken string) (string, error) {
+	return cache.channelRepo.IssueWebSocketTicket(ctx, userID, channelID, accessToken)
+}
+func (cache *ChannelRepoCacheImpl) ConsumeWebSocketTicket(ctx context.Context, ticket string) (uint64, uint64, string, error) {
+	return cache.channelRepo.ConsumeWebSocketTicket(ctx, ticket)
+}
+func (cache *ChannelRepoCacheImpl) CreateDirectChannel(ctx context.Context, channelID, user1, user2 uint64) error {
+	return cache.channelRepo.CreateDirectChannel(ctx, channelID, user1, user2)
 }
 func (cache *ChannelRepoCacheImpl) ListRoomsByUser(ctx context.Context, userID uint64) ([]Room, error) {
 	return cache.channelRepo.ListRoomsByUser(ctx, userID)

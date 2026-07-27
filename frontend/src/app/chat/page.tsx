@@ -11,6 +11,8 @@ import {
   WifiOff,
   MessageCircle,
   Users,
+  UsersRound,
+  Settings,
   Loader2,
   Upload,
   Pin,
@@ -24,18 +26,17 @@ import {
 } from "lucide-react";
 import {
   ACCESS_TOKEN_KEY,
+  CONVERSATION_CONTEXT_KEY,
   EVENT_TEXT,
   EVENT_ACTION,
-  EVENT_SEEN,
   EVENT_FILE,
   EVENT_EDIT,
   EVENT_DELETE,
   EVENT_REACTION,
   EVENT_PIN,
 } from "@/lib/constants";
-import type { Message, FilePayload, PinnedMessage } from "@/lib/constants";
+import type { Message, FilePayload, PinnedMessage, ConversationContext } from "@/lib/constants";
 import {
-  deleteChannel,
   fetchUser,
   fetchChannelUsers,
   fetchChannelMessages,
@@ -50,8 +51,12 @@ import {
   getFileExtension,
   isImageExtension,
   mobileCheck,
-} from "@/lib/api";
-import { cacheMessages, clearAll, getCachedMessages } from "@/lib/offline";
+  logout,
+  markChannelRead,
+  issueChatWebSocketTicket,
+  updateRoomAvatar,
+} from "@/lib/api"
+import { cacheMessages, getCachedMessages } from "@/lib/offline";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import ChatMessage from "@/components/ChatMessage";
 import ImageModal from "@/components/ImageModal";
@@ -60,6 +65,7 @@ import AnimatedBackground from "@/components/AnimatedBackground";
 import GalleryItem from "@/components/GalleryItem";
 import RealtimePanel from "@/components/RealtimePanel";
 import RoomsPanel from "@/components/RoomsPanel";
+import FriendRequestsPanel from "@/components/FriendRequestsPanel";
 
 interface PeerInfo {
   name: string;
@@ -96,12 +102,18 @@ export default function ChatPage() {
   const [isSearching, setIsSearching] = useState(false);
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [profileName, setProfileName] = useState("");
+  const [profileHandle, setProfileHandle] = useState("");
   const [profilePicture, setProfilePicture] = useState("");
   const [profileError, setProfileError] = useState("");
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [showAIPanel, setShowAIPanel] = useState(false);
   const [isAIWorking, setIsAIWorking] = useState(false);
   const [aiError, setAIError] = useState("");
+  const [conversation, setConversation] = useState<ConversationContext>({ channel_id: "", kind: "random", title: "Random match" });
+  const [showRoomSettings, setShowRoomSettings] = useState(false);
+  const [roomAvatar, setRoomAvatar] = useState("");
+  const [roomError, setRoomError] = useState("");
+  const [isSavingRoom, setIsSavingRoom] = useState(false);
 
   const peerMapRef = useRef<Map<string, PeerInfo>>(new Map());
   const peerMessagesRef = useRef<Message[]>([]);
@@ -109,6 +121,8 @@ export default function ChatPage() {
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const userIdRef = useRef("");
   const accessTokenRef = useRef("");
+  const lastReadMessageIdRef = useRef("0");
+  const readStateRequestRef = useRef<Promise<void> | null>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const prevScrollHeightRef = useRef(0);
@@ -205,18 +219,22 @@ export default function ChatPage() {
     }
   }, []);
 
-  const markMessagesAsSeen = useCallback(() => {
-    const ws = useWebSocketRef.current;
-    if (!ws) return;
-    for (let i = peerMessagesRef.current.length - 1; i >= 0; i--) {
-      if (peerMessagesRef.current[i].seen) break;
-      peerMessagesRef.current[i].seen = true;
-      ws.send({
-        event: EVENT_SEEN,
-        user_id: peerMessagesRef.current[i].user_id!,
-        payload: peerMessagesRef.current[i].message_id!,
+  const markMessagesAsRead = useCallback(() => {
+    const messageId = peerMessagesRef.current.reduce((max, message) => {
+      const current = message.message_id || "0";
+      if (!/^\d+$/.test(current)) return max;
+      return BigInt(current) > BigInt(max) ? current : max;
+    }, lastReadMessageIdRef.current);
+    if (messageId === lastReadMessageIdRef.current) return;
+    if (readStateRequestRef.current) return;
+    readStateRequestRef.current = markChannelRead(messageId)
+      .then(() => {
+        lastReadMessageIdRef.current = messageId;
+      })
+      .catch(() => {})
+      .finally(() => {
+        readStateRequestRef.current = null;
       });
-    }
   }, []);
 
   const updateOnlineUsers = useCallback(async () => {
@@ -270,7 +288,7 @@ export default function ChatPage() {
             await updateOnlineUsers();
             if (m.user_id !== uid) {
               const peer = await getPeerInfo(m.user_id!);
-              return { ...m, payload: `${peer.name} leaved, channel closed`, side };
+              return { ...m, payload: `${peer.name} left the conversation`, side };
             }
             return null;
           }
@@ -305,7 +323,6 @@ export default function ChatPage() {
       if (m.event === EVENT_ACTION) {
         if (m.payload === "leaved") {
           await updateOnlineUsers();
-          setConnectionStatus("disconnected");
         }
         if (["waiting", "joined", "offline"].includes(m.payload)) {
           await updateOnlineUsers();
@@ -338,16 +355,6 @@ export default function ChatPage() {
             msg.message_id === targetMsgId
               ? { ...msg, deleted_for_all: true, deleted_by: m.user_id, payload: "" }
               : msg
-          )
-        );
-        return;
-      }
-
-      if (m.event === EVENT_SEEN) {
-        const seenMsgId = m.payload;
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.message_id === seenMsgId ? { ...msg, seen: true } : msg
           )
         );
         return;
@@ -435,7 +442,7 @@ export default function ChatPage() {
         peerMessagesRef.current.push(m);
         ws.send({ event: EVENT_ACTION, user_id: uid, payload: `delivered:${m.message_id}` });
         if (!isPageHiddenRef.current) {
-          markMessagesAsSeen();
+          markMessagesAsRead();
         }
       }
 
@@ -445,7 +452,7 @@ export default function ChatPage() {
         }
       }, 50);
     },
-    [processMessage, updateOnlineUsers, markMessagesAsSeen, mergeMessages, cacheChannelMessages, shouldNotifyIncomingMessage]
+    [processMessage, updateOnlineUsers, markMessagesAsRead, mergeMessages, cacheChannelMessages, shouldNotifyIncomingMessage]
   );
 
   const ws = useWebSocket({
@@ -466,9 +473,19 @@ export default function ChatPage() {
 
     const token = localStorage.getItem(ACCESS_TOKEN_KEY);
     const uid = localStorage.getItem("rc:userid");
+    const savedContext = localStorage.getItem(CONVERSATION_CONTEXT_KEY);
+    if (savedContext) {
+      try {
+        const parsed = JSON.parse(savedContext) as ConversationContext;
+        setConversation(parsed);
+        setRoomAvatar(parsed.avatar || "");
+      } catch {}
+    }
     const username = localStorage.getItem("rc:username") || "User";
+    const userhandle = localStorage.getItem("rc:userhandle") || "";
     const userpicture = localStorage.getItem("rc:userpicture") || "";
     setProfileName(username);
+    setProfileHandle(userhandle);
     setProfilePicture(userpicture);
 
     if (!token || !uid) {
@@ -485,22 +502,37 @@ export default function ChatPage() {
       picture: userpicture || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${uid}`,
     });
 
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const chatUrl = `${protocol}//${window.location.host}/api/chat?uid=${uid}&access_token=${token}`;
-    ws.connect(chatUrl);
-    hasInitialized.current = true;
+    void (async () => {
+      try {
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        ws.connect(async () => {
+          const { ticket } = await issueChatWebSocketTicket();
+          return `${protocol}//${window.location.host}/api/chat?uid=${encodeURIComponent(uid)}&ticket=${encodeURIComponent(ticket)}`;
+        });
+        hasInitialized.current = true;
+      } catch {
+        router.push("/");
+      }
+    })();
   }, []);
+
+  useEffect(() => {
+    if (!conversation.peer_user_id || conversation.kind === "group") return;
+    void fetchUser(conversation.peer_user_id).then((peer) => {
+      setConversation((current) => ({ ...current, title: peer.name, avatar: peer.picture || current.avatar, peer_handle: peer.handle || current.peer_handle }));
+    }).catch(() => {});
+  }, [conversation.peer_user_id, conversation.kind]);
 
   useEffect(() => {
     const handleVisibility = () => {
       isPageHiddenRef.current = document.visibilityState === "hidden";
       if (!isPageHiddenRef.current) {
-        markMessagesAsSeen();
+        markMessagesAsRead();
       }
     };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, [markMessagesAsSeen]);
+  }, [markMessagesAsRead]);
 
   useEffect(() => {
     const handleBeforeUnload = () => {
@@ -524,7 +556,6 @@ export default function ChatPage() {
       payload: draftText,
       message_id: clientId,
       time: timeStr,
-      seen: false,
       side: "right",
       status: "sending",
       client_id: clientId,
@@ -552,7 +583,7 @@ export default function ChatPage() {
   }, [ws, draftText, clearDraft]);
 
   const handleTyping = useCallback(() => {
-    markMessagesAsSeen();
+    markMessagesAsRead();
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     if (!isTypingRef.current) {
       ws.send({ event: EVENT_ACTION, user_id: userIdRef.current, payload: "istyping" });
@@ -562,7 +593,7 @@ export default function ChatPage() {
       ws.send({ event: EVENT_ACTION, user_id: userIdRef.current, payload: "endtyping" });
       isTypingRef.current = false;
     }, 1000);
-  }, [ws, markMessagesAsSeen]);
+  }, [ws, markMessagesAsRead]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -674,34 +705,36 @@ export default function ChatPage() {
     [handleFileUpload]
   );
 
-  const handleLeave = useCallback(async () => {
-    if (!confirm("Are you sure you want to leave?")) return;
-    try {
-      if (userIdRef.current) {
-        await deleteChannel(userIdRef.current);
-      }
-    } catch (err) {
-      console.error("Leave channel failed:", err);
-    } finally {
-      clearDraft();
-      try {
-        await clearAll();
-      } catch (err) {
-        console.error("Clear offline cache failed:", err);
-      }
-      localStorage.removeItem(ACCESS_TOKEN_KEY);
-      setAccessToken("");
-      accessTokenRef.current = "";
-      setConnectionStatus("disconnected");
-      ws.disconnect();
-      router.replace("/");
-    }
+  const handleLeave = useCallback(() => {
+    if (!confirm("Are you sure you want to leave this session?")) return;
+    clearDraft();
+    // Keep the channel token and local history so the same user can reconnect later.
+    localStorage.setItem("rc:skip-auto-resume", "1");
+    setConnectionStatus("disconnected");
+    ws.disconnect();
+    router.replace("/");
   }, [clearDraft, router, ws]);
 
-  const handleOpenRoom = useCallback((token: string) => {
+  const handleLogout = useCallback(async () => {
+    try { await logout(); } catch {}
+    ws.disconnect();
+    localStorage.removeItem(ACCESS_TOKEN_KEY);
+    localStorage.removeItem("rc:userid");
+    localStorage.removeItem("rc:username");
+    localStorage.removeItem("rc:userhandle");
+    localStorage.removeItem("rc:userpicture");
+    router.replace("/");
+  }, [router, ws]);
+
+  const handleOpenRoom = useCallback(async (token: string, _channelId: string, context?: ConversationContext) => {
     const uid = userIdRef.current;
     if (!uid || !token) return;
     localStorage.setItem(ACCESS_TOKEN_KEY, token);
+    if (context) {
+      setConversation(context);
+      setRoomAvatar(context.avatar || "");
+      localStorage.setItem(CONVERSATION_CONTEXT_KEY, JSON.stringify(context));
+    }
     setAccessToken(token);
     accessTokenRef.current = token;
     setMessages([]);
@@ -711,7 +744,10 @@ export default function ChatPage() {
     peerMessagesRef.current = [];
     ws.disconnect();
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    ws.connect(`${protocol}//${window.location.host}/api/chat?uid=${uid}&access_token=${token}`);
+    ws.connect(async () => {
+      const { ticket } = await issueChatWebSocketTicket();
+      return `${protocol}//${window.location.host}/api/chat?uid=${encodeURIComponent(uid)}&ticket=${encodeURIComponent(ticket)}`;
+    });
     setConnectionStatus("connecting");
   }, [ws]);
 
@@ -972,6 +1008,36 @@ export default function ChatPage() {
     } catch {}
   }, []);
 
+  const handleRoomAvatarUpload = useCallback(async (file: File) => {
+    setRoomError("");
+    if (!file.type.startsWith("image/")) {
+      setRoomError("Please choose an image file.");
+      return;
+    }
+    try {
+      setRoomAvatar(await resizeAvatarFile(file));
+    } catch {
+      setRoomError("Could not read this group image.");
+    }
+  }, []);
+
+  const handleSaveRoom = useCallback(async () => {
+    if (!conversation.channel_id || conversation.kind !== "group") return;
+    setIsSavingRoom(true);
+    setRoomError("");
+    try {
+      const updated = await updateRoomAvatar(conversation.channel_id, roomAvatar);
+      const next = { ...conversation, avatar: updated.avatar || "" };
+      setConversation(next);
+      localStorage.setItem(CONVERSATION_CONTEXT_KEY, JSON.stringify(next));
+      setShowRoomSettings(false);
+    } catch {
+      setRoomError("The group avatar could not be updated. Only the owner can change it.");
+    } finally {
+      setIsSavingRoom(false);
+    }
+  }, [conversation, roomAvatar]);
+
   const handleAvatarUpload = useCallback(async (file: File) => {
     setProfileError("");
     if (!file.type.startsWith("image/")) {
@@ -1020,13 +1086,13 @@ export default function ChatPage() {
     const atBottom = el.scrollHeight - el.offsetHeight - el.scrollTop < 80;
     isAtBottomRef.current = atBottom;
     if (!isPageHiddenRef.current && atBottom) {
-      markMessagesAsSeen();
+      markMessagesAsRead();
     }
     if (el.scrollTop < 120 && hasMoreMessages && !isLoadingMore) {
       prevScrollHeightRef.current = el.scrollHeight;
       loadMoreMessages();
     }
-  }, [hasMoreMessages, isLoadingMore, loadMoreMessages, markMessagesAsSeen]);
+  }, [hasMoreMessages, isLoadingMore, loadMoreMessages, markMessagesAsRead]);
 
   useEffect(() => {
     if (prevScrollHeightRef.current > 0 && chatContainerRef.current) {
@@ -1045,6 +1111,13 @@ export default function ChatPage() {
       : "text-red-400";
 
   const StatusIcon = connectionStatus === "connected" ? Wifi : WifiOff;
+  const isGroupConversation = conversation.kind === "group";
+  const conversationAvatar = conversation.avatar || `https://api.dicebear.com/7.x/${isGroupConversation ? "identicon" : "pixel-art"}/svg?seed=${conversation.channel_id || userId || "chat"}`;
+  const conversationSubtitle = isGroupConversation
+    ? `${conversation.member_count || onlineUsers.split(",").filter(Boolean).length || 1} members · group chat`
+    : conversation.kind === "direct"
+      ? `@${conversation.peer_handle || conversation.peer_user_id || "direct"}`
+      : `matched peer · ${connectionStatus}`;
 
   return (
     <div className="h-screen w-screen flex flex-col relative overflow-hidden">
@@ -1060,51 +1133,37 @@ export default function ChatPage() {
         onDrop={handleDrop}
       >
         <header className="flex justify-between items-center px-4 py-3 glass-dark border-b border-white/5">
-          <div className="flex items-center gap-3">
-            <motion.button
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
-              onClick={() => {
-                setShowProfileSettings(true);
-              }}
-              className="flex items-center gap-3 bg-transparent border-none p-0 cursor-pointer text-left"
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              onClick={() => isGroupConversation && myRole === "owner" ? setShowRoomSettings(true) : undefined}
+              title={isGroupConversation && myRole === "owner" ? "Change group avatar" : conversation.title}
+              className={`relative h-11 w-11 shrink-0 rounded-xl border border-white/10 bg-cover bg-center ${isGroupConversation && myRole === "owner" ? "cursor-pointer hover:ring-2 hover:ring-cyan-400/40" : "cursor-default"}`}
+              style={{ backgroundImage: `url(${conversationAvatar})` }}
             >
-              <div
-                className="w-9 h-9 rounded-xl bg-gradient-to-br from-accent-cyan/30 to-accent-violet/30 border border-white/10 bg-cover bg-center bg-no-repeat flex-shrink-0"
-                style={{
-                  backgroundImage: `url(${profilePicture || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${userId || "user"}`})`,
-                }}
-              />
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-text-primary truncate max-w-[150px]">
-                    {profileName || "User"}
-                  </span>
-                  {myRole !== "member" && (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium ${
-                      myRole === "owner" ? "bg-amber-500/20 text-amber-400" : "bg-accent-violet/20 text-accent-violet"
-                    }`}>
-                      {myRole}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <StatusIcon className={`w-3 h-3 ${statusColor}`} />
-                  <span className="text-xs text-text-muted capitalize">
-                    {connectionStatus}
-                  </span>
-                </div>
+              {isGroupConversation && myRole === "owner" && <Settings className="absolute -bottom-1 -right-1 h-4 w-4 rounded-full bg-slate-950 p-0.5 text-cyan-300" />}
+            </button>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="max-w-[180px] truncate text-sm font-semibold text-text-primary sm:max-w-[280px]">{conversation.title}</span>
+                {isGroupConversation && <span className="rounded-md bg-cyan-500/15 px-1.5 py-0.5 text-[10px] text-cyan-300">GROUP</span>}
+                {myRole !== "member" && isGroupConversation && <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300">{myRole}</span>}
               </div>
-            </motion.button>
-            <div className="hidden md:flex items-center gap-2 text-xs text-text-muted min-w-0">
-              <Users className="w-3.5 h-3.5 text-text-secondary flex-shrink-0" />
-              <span className="truncate max-w-[220px]">{onlineUsers}</span>
+              <div className="flex items-center gap-1.5">
+                <StatusIcon className={`h-3 w-3 ${statusColor}`} />
+                <span className="max-w-[220px] truncate text-xs text-text-muted">{conversationSubtitle}</span>
+              </div>
+            </div>
+            <div className="hidden md:flex min-w-0 items-center gap-2 text-xs text-text-muted">
+              <Users className="h-3.5 w-3.5 shrink-0 text-text-secondary" />
+              <span className="max-w-[180px] truncate">{onlineUsers}</span>
             </div>
           </div>
 
           <div className="flex items-center gap-1 sm:gap-2">
+            <FriendRequestsPanel compact />
             <RoomsPanel userId={userId} onOpenRoom={handleOpenRoom} />
             <RealtimePanel userId={userId} accessToken={accessToken} />
+            <button title={`Profile @${profileHandle || userId}`} onClick={() => setShowProfileSettings(true)} className="h-8 w-8 rounded-lg border border-white/10 bg-cover bg-center" style={{ backgroundImage: `url(${profilePicture || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${userId || "user"}`})` }} />
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
@@ -1171,6 +1230,18 @@ export default function ChatPage() {
         )}
 
         <div ref={containerRef} className="flex-1 relative overflow-hidden">
+          {connectionStatus !== "connected" && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-slate-950/20 text-center"
+            >
+              <StatusIcon className={`h-8 w-8 ${statusColor}`} />
+              <p className="font-medium text-text-secondary">{connectionStatus === "connecting" ? "Connecting to chat…" : "Reconnecting to chat…"}</p>
+              <p className="max-w-sm text-sm text-text-muted">Your secure chat connection is being restored. Please keep this page open.</p>
+            </motion.div>
+          )}
+
           {messages.length === 0 && connectionStatus === "connected" && !isLoadingMore && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -1180,8 +1251,8 @@ export default function ChatPage() {
               <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-accent-cyan/20 to-accent-violet/20 flex items-center justify-center border border-white/10">
                 <MessageCircle className="w-8 h-8 text-accent-cyan" />
               </div>
-              <p className="text-text-secondary font-medium">Matched! Say hello</p>
-              <p className="text-text-muted text-sm">Start a conversation</p>
+              <p className="text-text-secondary font-medium">{isGroupConversation ? "No messages in this group yet" : conversation.kind === "direct" ? "Start the conversation" : "Connected! Say hello"}</p>
+              <p className="text-text-muted text-sm">{isGroupConversation ? `Invite people to ${conversation.title}` : "Start a conversation"}</p>
             </motion.div>
           )}
 
@@ -1223,6 +1294,18 @@ export default function ChatPage() {
         </div>
 
         <ImageModal src={modalImage} onClose={() => setModalImage(null)} />
+
+        {showRoomSettings && isGroupConversation && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-lg" onClick={() => setShowRoomSettings(false)} />
+            <div className="relative z-[1] w-full max-w-sm rounded-2xl border border-white/10 bg-slate-950/95 p-5 shadow-2xl">
+              <div className="mb-5 flex items-center justify-between"><div><h3 className="text-base font-semibold text-white">Group profile</h3><p className="mt-1 text-xs text-text-muted">Shared avatar for {conversation.title}</p></div><button onClick={() => setShowRoomSettings(false)} className="rounded-lg p-2 text-text-muted hover:bg-white/10"><X className="h-4 w-4" /></button></div>
+              <label className="group relative mx-auto block h-28 w-28 cursor-pointer"><input type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleRoomAvatarUpload(file); event.target.value = ""; }} /><div className="h-full w-full rounded-3xl border border-white/10 bg-cover bg-center" style={{ backgroundImage: `url(${roomAvatar || conversationAvatar})` }} /><div className="absolute inset-0 flex items-center justify-center rounded-3xl bg-black/50 text-xs text-white opacity-0 transition-opacity group-hover:opacity-100">Change avatar</div></label>
+              {roomError && <p className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-300">{roomError}</p>}
+              <div className="mt-5 flex gap-2"><button onClick={() => setShowRoomSettings(false)} className="flex-1 rounded-xl bg-white/5 py-2.5 text-sm text-text-secondary">Cancel</button><button onClick={() => void handleSaveRoom()} disabled={isSavingRoom} className="flex-1 rounded-xl bg-gradient-to-r from-accent-cyan to-accent-violet py-2.5 text-sm font-medium text-white disabled:opacity-50">{isSavingRoom ? "Saving…" : "Save avatar"}</button></div>
+            </div>
+          </div>
+        )}
 
         {showProfileSettings && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1266,6 +1349,12 @@ export default function ChatPage() {
                 </label>
 
                 <div className="w-full">
+                  <label className="text-xs text-text-muted font-medium">Public handle</label>
+                  <div className="mt-2 w-full rounded-xl bg-accent-violet/10 px-4 py-2.5 text-sm text-accent-violet">@{profileHandle || userId}</div>
+                  <p className="mt-1 text-[11px] text-text-muted">ID: {userId}</p>
+                </div>
+
+                <div className="w-full">
                   <label className="text-xs text-text-muted font-medium">Display name</label>
                   <input
                     value={profileName}
@@ -1286,6 +1375,12 @@ export default function ChatPage() {
                 )}
 
                 <div className="flex items-center gap-2 w-full">
+                  <button
+                    onClick={() => void handleLogout()}
+                    className="flex-1 px-4 py-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/20 cursor-pointer transition-colors text-sm"
+                  >
+                    Log out
+                  </button>
                   <button
                     onClick={() => setShowProfileSettings(false)}
                     className="flex-1 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-text-secondary border border-white/10 cursor-pointer transition-colors text-sm"

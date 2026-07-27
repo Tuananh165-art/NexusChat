@@ -2,12 +2,18 @@ package realtime
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"net"
+	"os"
+	"strings"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -27,8 +33,31 @@ func (s *StructRPCServer) Invoke(ctx context.Context, method string, request *st
 	return handler(ctx, request)
 }
 
+func internalAuthInterceptor(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	if strings.HasPrefix(info.FullMethod, "/grpc.health.v1.Health/") {
+		return handler(ctx, req)
+	}
+	secret := os.Getenv("NEXUSCHAT_GRPC_SHARED_SECRET")
+	if secret == "" {
+		return nil, status.Error(codes.Unauthenticated, "internal grpc authentication is not configured")
+	}
+	values := metadata.ValueFromIncomingContext(ctx, "authorization")
+	serviceIDs := metadata.ValueFromIncomingContext(ctx, "service-id")
+	if len(values) == 0 || len(serviceIDs) == 0 || subtle.ConstantTimeCompare([]byte(values[0]), []byte("Bearer "+secret)) != 1 || strings.TrimSpace(serviceIDs[0]) == "" {
+		return nil, status.Error(codes.Unauthenticated, "invalid internal grpc credentials")
+	}
+	if err := VerifyStructAssertion(ctx, req.(*structpb.Struct), info.FullMethod); err != nil {
+		return nil, status.Error(codes.Unauthenticated, err.Error())
+	}
+	return handler(ctx, req)
+}
+
 func NewGRPCServer(serviceName string, methods map[string]func(context.Context, *structpb.Struct) (*structpb.Struct, error)) *grpc.Server {
-	server := grpc.NewServer()
+	opts := []grpc.ServerOption{grpc.UnaryInterceptor(internalAuthInterceptor)}
+	if credentials := MustServerTransportCredentials(); credentials != nil {
+		opts = append(opts, grpc.Creds(credentials))
+	}
+	server := grpc.NewServer(opts...)
 	RegisterStructRPC(server, serviceName, methods)
 	healthServer := health.NewServer()
 	healthpb.RegisterHealthServer(server, healthServer)

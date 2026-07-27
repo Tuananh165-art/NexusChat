@@ -36,10 +36,17 @@ func MaxAllowed(n int64) gin.HandlerFunc {
 
 func CorsMiddleware() gin.HandlerFunc {
 	config := cors.Config{
-		AllowAllOrigins:  true,
+		AllowOriginFunc: func(origin string) bool {
+			switch origin {
+			case "http://localhost", "http://localhost:3000", "http://127.0.0.1", "http://127.0.0.1:3000", "http://nexuschat.click", "https://nexuschat.click":
+				return true
+			default:
+				return false
+			}
+		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", JWTAuthHeader, ChannelIdHeader, "X-User-Id"},
-		AllowCredentials: false,
+		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", JWTAuthHeader, ChannelIdHeader},
+		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}
 	return cors.New(config)

@@ -10,6 +10,8 @@ interface UseWebSocketOptions {
   onStatusChange: (status: WebSocketStatus) => void;
 }
 
+type WebSocketURL = string | (() => Promise<string>);
+
 export function useWebSocket({ onMessage, onStatusChange }: UseWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const shouldReconnect = useRef(true);
@@ -17,7 +19,7 @@ export function useWebSocket({ onMessage, onStatusChange }: UseWebSocketOptions)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const onMessageRef = useRef(onMessage);
   const onStatusChangeRef = useRef(onStatusChange);
-  const urlRef = useRef<string>("");
+  const urlFactoryRef = useRef<WebSocketURL | null>(null);
 
   useEffect(() => {
     onMessageRef.current = onMessage;
@@ -37,7 +39,7 @@ export function useWebSocket({ onMessage, onStatusChange }: UseWebSocketOptions)
       wsRef.current.onmessage = null;
       wsRef.current.onclose = null;
       wsRef.current.onerror = null;
-      if (wsRef.current.readyState === WebSocket.OPEN || 
+      if (wsRef.current.readyState === WebSocket.OPEN ||
           wsRef.current.readyState === WebSocket.CONNECTING) {
         wsRef.current.close();
       }
@@ -45,23 +47,42 @@ export function useWebSocket({ onMessage, onStatusChange }: UseWebSocketOptions)
     }
   }, []);
 
-  const connect = useCallback((url: string) => {
-    // Prevent multiple connections
-    if (wsRef.current?.readyState === WebSocket.OPEN || 
+  const connect = useCallback((urlFactory: WebSocketURL) => {
+    // Prevent multiple connections.
+    if (wsRef.current?.readyState === WebSocket.OPEN ||
         wsRef.current?.readyState === WebSocket.CONNECTING) {
       return;
     }
 
-    urlRef.current = url;
+    urlFactoryRef.current = urlFactory;
     reconnectAttempts.current = 0;
     shouldReconnect.current = true;
 
-    const doConnect = () => {
-      cleanup();
-      
+    const scheduleReconnect = (doConnect: () => void) => {
       if (!shouldReconnect.current) return;
+      reconnectAttempts.current++;
+      const exponential = Math.min(1000 * Math.pow(2, reconnectAttempts.current - 1), 30000);
+      const delay = Math.round(exponential * (0.8 + Math.random() * 0.4));
+      reconnectTimeoutRef.current = setTimeout(doConnect, delay);
+    };
 
+    const doConnect = async () => {
+      cleanup();
+      if (!shouldReconnect.current) return;
       onStatusChangeRef.current("connecting");
+
+      let url: string;
+      try {
+        const currentFactory = urlFactoryRef.current;
+        if (!currentFactory) return;
+        url = typeof currentFactory === "function" ? await currentFactory() : currentFactory;
+        if (!shouldReconnect.current) return;
+      } catch (err) {
+        console.error("WebSocket ticket request failed:", err);
+        onStatusChangeRef.current("disconnected");
+        scheduleReconnect(() => void doConnect());
+        return;
+      }
 
       try {
         const ws = new WebSocket(url);
@@ -77,31 +98,30 @@ export function useWebSocket({ onMessage, onStatusChange }: UseWebSocketOptions)
             const msg = JSON.parse(e.data) as Message;
             onMessageRef.current(msg);
           } catch {
-            // ignore parse errors
+            // Ignore malformed frames from the server.
           }
         };
 
         ws.onclose = () => {
+          // An old socket can close after a room switch. It must not mark or
+          // reconnect over the newer socket that replaced it.
+          if (wsRef.current !== ws) return;
           onStatusChangeRef.current("disconnected");
           wsRef.current = null;
-          
-          if (shouldReconnect.current && reconnectAttempts.current < 10) {
-            reconnectAttempts.current++;
-            const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current - 1), 30000);
-            reconnectTimeoutRef.current = setTimeout(doConnect, delay);
-          }
+          scheduleReconnect(() => void doConnect());
         };
 
         ws.onerror = () => {
-          // Error will trigger onclose
+          // The close event carries the reconnect path.
         };
       } catch (err) {
         console.error("WebSocket connection error:", err);
         onStatusChangeRef.current("disconnected");
+        scheduleReconnect(() => void doConnect());
       }
     };
 
-    doConnect();
+    void doConnect();
   }, [cleanup]);
 
   const send = useCallback((msg: object) => {
