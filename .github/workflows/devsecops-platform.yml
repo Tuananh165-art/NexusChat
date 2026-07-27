@@ -168,7 +168,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Trivy filesystem scan
+      - name: Trivy filesystem vulnerability gate
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
@@ -177,11 +177,22 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"
+          format: table
+
+      - name: Trivy filesystem SARIF report
+        if: always()
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          ignore-unfixed: true
+          exit-code: "0"
           format: sarif
           output: trivy-fs.sarif
 
       - name: Upload Trivy SARIF
-        if: always()
+        if: always() && hashFiles('trivy-fs.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-fs.sarif
