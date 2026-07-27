@@ -21,7 +21,7 @@ permissions:
 env:
   REGISTRY: docker.io
   IMAGE_NAMESPACE: tuananh165
-  GO_VERSION: "1.24"
+  GO_VERSION: "1.25.12"
   NODE_VERSION: "20"
   PYTHON_VERSION: "3.12"
 
@@ -173,6 +173,7 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
+          scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"

@@ -1,5 +1,6 @@
 {{- range $name, $svc := .Values.services }}
-{{- if and $svc.enabled $svc.autoscaling.enabled }}
+{{- $autoscaling := default (dict) $svc.autoscaling }}
+{{- if and $svc.enabled $autoscaling.enabled }}
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -12,14 +13,14 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: {{ $name }}
-  minReplicas: {{ $svc.autoscaling.minReplicas }}
-  maxReplicas: {{ $svc.autoscaling.maxReplicas }}
+  minReplicas: {{ $autoscaling.minReplicas }}
+  maxReplicas: {{ $autoscaling.maxReplicas }}
   metrics:
     - type: Resource
       resource:
         name: cpu
         target:
           type: Utilization
-          averageUtilization: {{ $svc.autoscaling.targetCPUUtilizationPercentage }}
+          averageUtilization: {{ $autoscaling.targetCPUUtilizationPercentage }}
 {{- end }}
 {{- end }}
