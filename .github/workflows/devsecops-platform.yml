@@ -304,18 +304,29 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Trivy image scan
+      - name: Trivy image vulnerability gate
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}
+          scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"
+          format: table
+
+      - name: Trivy image SARIF report
+        if: always()
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}
+          scanners: vuln
+          ignore-unfixed: true
+          exit-code: "0"
           format: sarif
           output: trivy-${{ matrix.name }}.sarif
 
       - name: Upload image scan SARIF
-        if: always()
+        if: always() && hashFiles(format('trivy-{0}.sarif', matrix.name)) != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-${{ matrix.name }}.sarif
@@ -425,50 +436,83 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Scan api proxy-upload image
+      - name: Gate api proxy-upload image vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: docker.io/tuananh165/nexuschat-api:proxy-upload-${{ steps.vars.outputs.tag }}
+          scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"
+          format: table
+
+      - name: Generate api proxy-upload image SARIF
+        if: always()
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: docker.io/tuananh165/nexuschat-api:proxy-upload-${{ steps.vars.outputs.tag }}
+          scanners: vuln
+          ignore-unfixed: true
+          exit-code: "0"
           format: sarif
           output: trivy-proxy-api.sarif
 
       - name: Upload api proxy scan SARIF
-        if: always()
+        if: always() && hashFiles('trivy-proxy-api.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-proxy-api.sarif
 
-      - name: Scan web proxy-upload image
+      - name: Gate web proxy-upload image vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: docker.io/tuananh165/nexuschat-web:proxy-upload-${{ steps.vars.outputs.tag }}
+          scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"
+          format: table
+
+      - name: Generate web proxy-upload image SARIF
+        if: always()
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: docker.io/tuananh165/nexuschat-web:proxy-upload-${{ steps.vars.outputs.tag }}
+          scanners: vuln
+          ignore-unfixed: true
+          exit-code: "0"
           format: sarif
           output: trivy-proxy-web.sarif
 
       - name: Upload web proxy scan SARIF
-        if: always()
+        if: always() && hashFiles('trivy-proxy-web.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-proxy-web.sarif
 
-      - name: Scan web proxy-upload-v2 image
+      - name: Gate web proxy-upload-v2 image vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: docker.io/tuananh165/nexuschat-web:proxy-upload-v2-${{ steps.vars.outputs.tag }}
+          scanners: vuln
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"
+          format: table
+
+      - name: Generate web proxy-upload-v2 image SARIF
+        if: always()
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: docker.io/tuananh165/nexuschat-web:proxy-upload-v2-${{ steps.vars.outputs.tag }}
+          scanners: vuln
+          ignore-unfixed: true
+          exit-code: "0"
           format: sarif
           output: trivy-proxy-web-v2.sarif
 
       - name: Upload web proxy-upload-v2 scan SARIF
-        if: always()
+        if: always() && hashFiles('trivy-proxy-web-v2.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-proxy-web-v2.sarif
