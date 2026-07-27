@@ -315,7 +315,6 @@ jobs:
           format: table
 
       - name: Trivy image SARIF report
-        if: always()
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}
@@ -447,7 +446,6 @@ jobs:
           format: table
 
       - name: Generate api proxy-upload image SARIF
-        if: always()
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: docker.io/tuananh165/nexuschat-api:proxy-upload-${{ steps.vars.outputs.tag }}
@@ -474,7 +472,6 @@ jobs:
           format: table
 
       - name: Generate web proxy-upload image SARIF
-        if: always()
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: docker.io/tuananh165/nexuschat-web:proxy-upload-${{ steps.vars.outputs.tag }}
@@ -501,7 +498,6 @@ jobs:
           format: table
 
       - name: Generate web proxy-upload-v2 image SARIF
-        if: always()
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: docker.io/tuananh165/nexuschat-web:proxy-upload-v2-${{ steps.vars.outputs.tag }}

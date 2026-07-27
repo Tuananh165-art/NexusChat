@@ -28,9 +28,9 @@ doc: swag
 	done
 
 wire:
-	GO111MODULE=on $(GOINSTALL) github.com/google/wire/cmd/wire@v0.6.0
+	GO111MODULE=on $(GOINSTALL) github.com/google/wire/cmd/wire@v0.7.0
 swag:
-	GO111MODULE=on $(GOINSTALL) github.com/swaggo/swag/cmd/swag@v1.8.12
+	GO111MODULE=on $(GOINSTALL) github.com/swaggo/swag/cmd/swag@v1.16.6
 
 docker: docker-api docker-web
 docker-api:
