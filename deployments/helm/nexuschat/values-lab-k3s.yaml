@@ -5,7 +5,7 @@ global:
   environment: lab
   deploymentStrategy:
     type: Recreate
-  # The lab exposes 192.168.109.131:80 through ingress-nginx.
+  # The lab exposes 192.168.109.131:80 through Traefik.
   # Keep tlsSecretName empty for the HTTP-only profile.
   domain: nexuschat.click
   tlsSecretName: ""
@@ -26,7 +26,7 @@ imageDefaults:
 
 ingress:
   enabled: true
-  className: nginx
+  className: traefik
   annotations: {}
 
 certManager:
@@ -118,7 +118,7 @@ services:
       fullname: docker.io/tuananh165/nexuschat-api:proxy-upload
     replicas: 1
     ingress:
-      className: nginx
+      className: traefik
       traefikForwardAuth:
         enabled: false
     env:
