@@ -5,12 +5,16 @@ on:
   pull_request:
     branches:
       - "**"
+    paths-ignore:
+      - "**/*.md"
   push:
     branches:
       - main
       - kafka
     tags:
       - "v*"
+    paths-ignore:
+      - "**/*.md"
 
 permissions:
   contents: read
@@ -645,7 +649,9 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in {1..6}; do
-            if kubectl --request-timeout=60s apply -f deployments/platform/dashboards; then
+            if kubectl --request-timeout=60s apply -f deployments/platform/dashboards && \
+               kubectl --request-timeout=60s apply -f deployments/platform/monitoring/standalone-monitoring.yaml && \
+               kubectl --request-timeout=60s apply -f deployments/platform/monitoring/ingresses.yaml; then
               exit 0
             fi
             if [[ "$attempt" == "6" ]]; then

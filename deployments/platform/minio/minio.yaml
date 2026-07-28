@@ -62,7 +62,7 @@ spec:
     - name: api
       port: 9000
       targetPort: api
-      nodePort: 30900
+      nodePort: 30090
 ---
 apiVersion: v1
 kind: Service

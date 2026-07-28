@@ -128,8 +128,8 @@ The app Helm chart does not install stateful dependencies. Kafka, Redis, Cassand
 |---|---|
 | `deployments/platform/observability/` | `kubectl apply` Jaeger and OpenTelemetry Collector |
 | `deployments/platform/dashboards/` | `kubectl apply` Kafka UI and RedisInsight |
-| `deployments/platform/monitoring/kube-prometheus-stack-values.yaml` | Values for installing kube-prometheus-stack; Grafana/Prometheus NodePorts and lightweight lab profile |
-| `deployments/platform/monitoring/ingresses.yaml` | Optional Traefik Ingress for Grafana, Prometheus, and Jaeger |
+| `deployments/platform/monitoring/standalone-monitoring.yaml` | Lightweight lab Grafana and Prometheus deployments with NodePorts `30300` and `30900` |
+| `deployments/platform/monitoring/ingresses.yaml` | Traefik Ingress for Grafana, Prometheus, and Jaeger subdomains |
 | `deployments/platform/ingresses.yaml` | Optional Traefik Ingress for Kafka UI, RedisInsight, and MinIO |
 | `deployments/platform/security/kyverno-policies.yaml` | Apply after installing Kyverno |
 | `deployments/platform/cassandra/cassandra.yaml` | Optional standalone lab Cassandra |
@@ -137,7 +137,7 @@ The app Helm chart does not install stateful dependencies. Kafka, Redis, Cassand
 
 ### Installing observability, monitoring, dashboards, and policy
 
-Create the Grafana Secret before installing kube-prometheus-stack; do not put a real password in Git:
+Create the Grafana Secret before applying the standalone monitoring manifests; do not put a real password in Git:
 
 ```bash
 kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
@@ -150,19 +150,11 @@ kubectl -n monitoring create secret generic grafana-admin \
 ```bash
 kubectl apply -f deployments/platform/observability
 kubectl apply -f deployments/platform/dashboards
+kubectl apply -f deployments/platform/monitoring/standalone-monitoring.yaml
+kubectl apply -f deployments/platform/monitoring/ingresses.yaml
 ```
 
-Install kube-prometheus-stack:
-
-```bash
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo update
-helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
-  --namespace monitoring \
-  --create-namespace \
-  --values deployments/platform/monitoring/kube-prometheus-stack-values.yaml \
-  --wait --timeout 10m
-```
+`kube-prometheus-stack-values.yaml` is kept as an optional heavier profile. The lab workflow applies the standalone manifests because they fit the single-node k3s resource budget.
 
 Install Kyverno and the policy:
 
@@ -185,6 +177,8 @@ kubectl apply -f deployments/platform/security/kyverno-policies.yaml
 | Jaeger | `30686` | `http://<NODE_IP>:30686` |
 
 `nexuschat.click:<port>` can be used instead of `<NODE_IP>` if DNS `nexuschat.click` points to the node IP and the firewall allows the port. This is a direct NodePort, bypasses Traefik, and does not provide TLS automatically. Production should use subdomains through Traefik, such as `grafana.nexuschat.click`, `prometheus.nexuschat.click`, and `jaeger.nexuschat.click`, with authentication/VPN/TLS.
+
+The DevSecOps workflow ignores markdown-only pushes. Updating only `*.md` files will not trigger CI/CD; commits that include code, manifests, workflow files, or other non-markdown files still run the pipeline.
 
 ### Deployment checks
 

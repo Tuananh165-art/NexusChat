@@ -21,6 +21,7 @@ The `nexuschat.click` host is routed by Traefik to the app. The lab profile is H
 | Grafana | `http://<NODE_IP>:30300` | `30300` |
 | Prometheus | `http://<NODE_IP>:30900` | `30900` |
 | Jaeger | `http://<NODE_IP>:30686` | `30686` |
+| MinIO API | `http://<NODE_IP>:30090` | `30090` |
 
 If the DNS record for `nexuschat.click` resolves to the same node IP and the firewall permits the port, the equivalent form is `http://nexuschat.click:<PORT>`, for example `http://nexuschat.click:30300` for Grafana. This is still direct NodePort traffic: it bypasses Traefik and does not inherit TLS, authentication, or routing from the app host.
 
@@ -42,16 +43,17 @@ Then apply the optional Ingress manifests:
 
 ```bash
 kubectl apply -f deployments/platform/ingresses.yaml
+kubectl apply -f deployments/platform/monitoring/standalone-monitoring.yaml
 kubectl apply -f deployments/platform/monitoring/ingresses.yaml
 ```
 
-The optional manifests use Traefik and the service names created by the current manifests/Helm release. They do not create DNS or TLS. The monitoring Ingresses require a kube-prometheus-stack release named `kube-prometheus-stack`.
+The optional manifests use Traefik and the service names created by the current manifests. They do not create DNS or TLS. The monitoring Ingresses route to the lightweight standalone `grafana`, `prometheus`, and `jaeger-ui` services.
 
 ## Deployment sources
 
 - Kafka UI and RedisInsight: `deployments/platform/dashboards/nodeport-dashboards.yaml`.
 - Jaeger and OpenTelemetry Collector: `deployments/platform/observability/`.
-- Grafana and Prometheus NodePorts: `deployments/platform/monitoring/kube-prometheus-stack-values.yaml`.
+- Grafana and Prometheus NodePorts: `deployments/platform/monitoring/standalone-monitoring.yaml`.
 - Cassandra has no web dashboard; use CQL or `kubectl port-forward`.
 
 ## Security

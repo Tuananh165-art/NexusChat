@@ -71,8 +71,9 @@ Platform manifests are not automatically rendered by the application Helm chart.
 |---|---|---|
 | `deployments/platform/observability/` | Yes | Jaeger and OpenTelemetry Collector for Kubernetes |
 | `deployments/platform/dashboards/` | Yes | Kafka UI and RedisInsight NodePorts |
-| `deployments/platform/monitoring/kube-prometheus-stack-values.yaml` | When installing kube-prometheus-stack | Grafana NodePort `30300`, Prometheus `30900`, and lightweight lab profile |
-| `deployments/platform/monitoring/ingresses.yaml` | Optional | Traefik Ingress for Grafana, Prometheus, and Jaeger |
+| `deployments/platform/monitoring/standalone-monitoring.yaml` | Yes | Lightweight Grafana NodePort `30300` and Prometheus NodePort `30900` |
+| `deployments/platform/monitoring/ingresses.yaml` | Yes | Traefik Ingress for Grafana, Prometheus, and Jaeger |
+| `deployments/platform/monitoring/kube-prometheus-stack-values.yaml` | Optional | Heavier kube-prometheus-stack profile for larger clusters |
 | `deployments/platform/ingresses.yaml` | Optional | Traefik Ingress for Kafka UI, RedisInsight, and MinIO |
 | `deployments/platform/security/kyverno-policies.yaml` | If using Kyverno | Runtime policy; Kyverno must be installed first |
 | `deployments/platform/cassandra/cassandra.yaml` | Optional | Standalone lab Cassandra |
@@ -87,13 +88,11 @@ kubectl -n monitoring create secret generic grafana-admin \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Install kube-prometheus-stack with the lab profile:
+Apply the lightweight standalone monitoring profile used by the lab workflow:
 
 ```bash
-helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack \
-  --namespace monitoring --create-namespace \
-  --values deployments/platform/monitoring/kube-prometheus-stack-values.yaml \
-  --wait --timeout 10m
+kubectl apply -f deployments/platform/monitoring/standalone-monitoring.yaml
+kubectl apply -f deployments/platform/monitoring/ingresses.yaml
 ```
 
 Apply the observability/dashboard manifests separately:
@@ -124,7 +123,7 @@ The workflow triggers on `workflow_dispatch`, `pull_request` to any branch, push
 - Push to `main`, `kafka`, or a `v*` tag: build images, blocking Trivy scans, SBOM generation, and Cosign signing.
 - Push to `main`: apply Jaeger/OTel and dashboard manifests, then directly deploy the app with Helm into `nexuschat-lab`.
 
-Stateful dependencies such as Kafka, Redis, Cassandra, MinIO, and PostgreSQL are not installed automatically by the application Helm chart; install them separately or use managed/external services, then update the hostnames in the values. The workflow also does not automatically provision kube-prometheus-stack or Kyverno. A `git pull` alone does not deploy; `git commit` followed by `git push` to `main` can trigger CD.
+Stateful dependencies such as Kafka, Redis, Cassandra, MinIO, and PostgreSQL are not installed automatically by the application Helm chart; install them separately or use managed/external services, then update the hostnames in the values. The workflow also does not automatically provision kube-prometheus-stack or Kyverno. A `git pull` alone does not deploy; `git commit` followed by `git push` to `main` can trigger CD, except markdown-only pushes are ignored by CI/CD.
 
 ## Generated API docs
 
