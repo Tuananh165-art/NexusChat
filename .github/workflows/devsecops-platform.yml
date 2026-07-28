@@ -606,11 +606,24 @@ jobs:
 
       - name: Verify cluster access
         run: |
+          set -euo pipefail
           kubectl version --client
           kubectl config current-context
           kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}{"\n"}'
-          kubectl get nodes -o wide
-          kubectl create namespace "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          for attempt in {1..12}; do
+            if kubectl --request-timeout=60s get --raw=/readyz >/tmp/kube-readyz; then
+              cat /tmp/kube-readyz
+              break
+            fi
+            if [[ "$attempt" == "12" ]]; then
+              echo "Kubernetes API did not become ready after ${attempt} attempts" >&2
+              exit 1
+            fi
+            echo "Kubernetes API is not ready yet; retrying in 10s (${attempt}/12)"
+            sleep 10
+          done
+          kubectl --request-timeout=60s get nodes -o wide
+          kubectl create namespace "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl --request-timeout=60s apply -f -
 
       - name: Deploy Jaeger and OpenTelemetry Collector
         run: kubectl apply -f deployments/platform/observability
