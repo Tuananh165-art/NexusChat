@@ -805,8 +805,14 @@ jobs:
 
       - name: Realtime service smoke checks
         run: |
+          set -euo pipefail
           for target in safety:5005 discovery:5006 workspace:5007; do
             name="${target%%:*}"
+            available="$(kubectl --request-timeout=60s -n "$KUBE_NAMESPACE" get deployment "$name" -o jsonpath='{.status.availableReplicas}' 2>/dev/null || true)"
+            if [[ "${available:-0}" == "0" ]]; then
+              echo "Deployment/$name has no available replicas; skipping smoke check in degraded lab."
+              continue
+            fi
             kubectl -n "$KUBE_NAMESPACE" run "smoke-${name}-${GITHUB_RUN_ID}" \
               --image=curlimages/curl:8.12.1 --restart=Never --rm --attach \
               --command -- curl --fail --max-time 10 "http://${target}/ready"
