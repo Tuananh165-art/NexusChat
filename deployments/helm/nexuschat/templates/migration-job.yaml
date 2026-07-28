@@ -41,11 +41,14 @@ spec:
               cqlsh "$CASSANDRA_HOST" "$CASSANDRA_PORT" -e "CREATE KEYSPACE IF NOT EXISTS \"NexusChat\" WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}; USE \"NexusChat\"; CREATE TABLE IF NOT EXISTS schema_migrations (migration_id text PRIMARY KEY, applied_at timestamp);"
               for migration in /migrations/*.cql; do
                 migration_id=$(basename "$migration" .cql)
-                if cqlsh "$CASSANDRA_HOST" "$CASSANDRA_PORT" -e "SELECT migration_id FROM \\\"NexusChat\\\".schema_migrations WHERE migration_id = '$migration_id';" | grep -q "$migration_id"; then continue; fi
+                if cqlsh "$CASSANDRA_HOST" "$CASSANDRA_PORT" -e "SELECT migration_id FROM \"NexusChat\".schema_migrations WHERE migration_id = '$migration_id';" | grep -q "$migration_id"; then continue; fi
                 if ! cqlsh "$CASSANDRA_HOST" "$CASSANDRA_PORT" -f "$migration"; then
-                  if [ "$migration_id" != "004_group_room_avatar" ]; then exit 1; fi
+                  case "$migration_id" in
+                    004_group_room_avatar|010_drop_messages_seen) ;;
+                    *) exit 1 ;;
+                  esac
                 fi
-                cqlsh "$CASSANDRA_HOST" "$CASSANDRA_PORT" -e "INSERT INTO \\\"NexusChat\\\".schema_migrations (migration_id, applied_at) VALUES ('$migration_id', dateOf(now()));"
+                cqlsh "$CASSANDRA_HOST" "$CASSANDRA_PORT" -e "INSERT INTO \"NexusChat\".schema_migrations (migration_id, applied_at) VALUES ('$migration_id', dateOf(now()));"
               done
           env:
             - name: CASSANDRA_HOST
