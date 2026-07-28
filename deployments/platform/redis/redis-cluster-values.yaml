@@ -1,0 +1,43 @@
+image:
+  registry: docker.io
+  repository: bitnamilegacy/redis-cluster
+  tag: 8.2.1
+
+password: lab-redis-pass
+usePassword: true
+usePasswordFiles: true
+
+cluster:
+  init: true
+  nodes: 3
+  replicas: 0
+
+redis:
+  resources:
+    requests:
+      cpu: 5m
+      memory: 96Mi
+    limits:
+      cpu: 200m
+      memory: 192Mi
+  readinessProbe:
+    timeoutSeconds: 2
+  defaultConfigOverride: |-
+    bind 0.0.0.0
+    protected-mode no
+    port 6379
+    cluster-enabled yes
+    cluster-config-file /bitnami/redis/data/nodes.conf
+    cluster-node-timeout 5000
+    appendonly yes
+    dir /bitnami/redis/data
+
+persistence:
+  enabled: true
+  size: 1Gi
+
+metrics:
+  enabled: false
+
+networkPolicy:
+  enabled: false

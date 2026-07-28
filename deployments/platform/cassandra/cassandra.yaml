@@ -162,7 +162,7 @@ spec:
                     /opt/cassandra/bin/cqlsh 127.0.0.1 9042 ${auth_args} -f /schema/init.cql
           resources:
             requests:
-              cpu: 100m
+              cpu: 25m
               memory: 768Mi
             limits:
               cpu: 700m

@@ -657,6 +657,42 @@ jobs:
             sleep 15
           done
 
+      - name: Restore lab data dependencies
+        run: |
+          set -euo pipefail
+
+          kubectl --request-timeout=60s apply -f deployments/platform/kafka
+          kubectl --request-timeout=60s apply -f deployments/platform/cassandra
+
+          helm upgrade --install redis oci://registry-1.docker.io/bitnamicharts/redis-cluster \
+            --version 13.0.4 \
+            --namespace redis \
+            --create-namespace \
+            --values deployments/platform/redis/redis-cluster-values.yaml \
+            --timeout 5m
+
+          wait_endpoint() {
+            local namespace="$1"
+            local service="$2"
+            local port_label="$3"
+            for attempt in {1..30}; do
+              endpoints="$(kubectl --request-timeout=60s -n "$namespace" get endpoints "$service" -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)"
+              if [[ -n "$endpoints" ]]; then
+                echo "$namespace/$service has endpoints: $endpoints"
+                return 0
+              fi
+              echo "Waiting for $namespace/$service endpoint on $port_label (${attempt}/30)"
+              sleep 10
+            done
+            echo "$namespace/$service has no ready endpoints after waiting" >&2
+            kubectl --request-timeout=60s -n "$namespace" get deploy,statefulset,pods,svc,endpoints -o wide || true
+            return 1
+          }
+
+          wait_endpoint kafka kafka 9092
+          wait_endpoint redis redis-redis-cluster 6379
+          wait_endpoint cassandra cassandra 9042
+
       - name: Sync environment files to Kubernetes Secrets
         env:
           TURN_SHARED_SECRET: ${{ secrets.CALL_TURN_SHAREDSECRET }}

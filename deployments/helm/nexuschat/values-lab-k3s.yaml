@@ -13,6 +13,7 @@ global:
   commonEnv:
     KAFKA_ADDRS: kafka.kafka.svc.cluster.local:9092
     KAFKA_VERSION: "3.6.0"
+    REDIS_ADDRS: redis-redis-cluster-0.redis-redis-cluster-headless.redis.svc.cluster.local:6379,redis-redis-cluster-1.redis-redis-cluster-headless.redis.svc.cluster.local:6379,redis-redis-cluster-2.redis-redis-cluster-headless.redis.svc.cluster.local:6379
     REDIS_EXPIRATIONHOUR: "24"
     OBSERVABILITY_PROMETHEUS_PORT: ""
     OBSERVABILITY_TRACING_OTLPENDPOINT: ""
