@@ -40,3 +40,4 @@ Set `grpcSecurity.enabled=true`, put the assertion variables in the configured r
 ## Rotation and failure behavior
 
 Use a new key ID during assertion rotation and deploy the corresponding public/private key pair atomically to callers and verifiers. Rotate mTLS certificates before expiry. A missing, invalid, expired, replayed, wrong-audience, wrong-method, or request-digest-mismatched assertion is rejected with `Unauthenticated`; an untrusted or missing client certificate is rejected during the TLS handshake.
+

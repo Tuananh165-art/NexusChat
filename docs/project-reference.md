@@ -214,3 +214,4 @@ deployments/platform/        stateful/observability/dashboard/security manifests
 .github/workflows/           CI security gates, image publishing, K3s CD
 docs/                        operational, architecture, API and feature documentation
 ```
+

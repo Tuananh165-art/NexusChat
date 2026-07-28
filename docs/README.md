@@ -78,8 +78,6 @@ Platform manifests are not automatically rendered by the application Helm chart.
 | `deployments/platform/cassandra/cassandra.yaml` | Optional | Standalone lab Cassandra |
 | `deployments/run.sh` | Local helper | Legacy Docker Compose helper |
 
-ArgoCD, Consul, ECK/ELK, ingress-nginx, and standalone monitoring have been removed from the current configuration. `kube-prometheus-stack` is the only Kubernetes monitoring option; Jaeger/OTel are declared in separate manifests.
-
 When installing kube-prometheus-stack, create the `grafana-admin` Secret in the `monitoring` namespace first because the values do not contain credentials:
 
 ```bash
@@ -125,7 +123,6 @@ The workflow triggers on `workflow_dispatch`, `pull_request` to any branch, push
 - Pull Request: tests, lint, builds, Helm rendering, and security scans.
 - Push to `main`, `kafka`, or a `v*` tag: build images, blocking Trivy scans, SBOM generation, and Cosign signing.
 - Push to `main`: apply Jaeger/OTel and dashboard manifests, then directly deploy the app with Helm into `nexuschat-lab`.
-- ArgoCD is not used.
 
 Stateful dependencies such as Kafka, Redis, Cassandra, MinIO, and PostgreSQL are not installed automatically by the application Helm chart; install them separately or use managed/external services, then update the hostnames in the values. The workflow also does not automatically provision kube-prometheus-stack or Kyverno. A `git pull` alone does not deploy; `git commit` followed by `git push` to `main` can trigger CD.
 
@@ -143,3 +140,4 @@ Regenerate them with:
 ```bash
 make doc
 ```
+

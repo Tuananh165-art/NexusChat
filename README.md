@@ -1,6 +1,6 @@
 # NexusChat
 
-NexusChat is a Go/Next.js real-time chat platform for anonymous matching. It includes Go services, a Next.js frontend served by `web`, and the FastAPI `ai-service`. The current lab runtime uses HTTP and WebSocket (`ws://`) through Traefik; TLS is not enabled. See the complete [project reference](docs/project-reference.md) for business workflows, service boundaries, feature/API inventory, migration policy, and known limitations.
+NexusChat is a Go/Next.js real-time chat platform for anonymous matching. It includes Go services, a Next.js frontend served by `web`, and the FastAPI `ai-service`. The current lab runtime uses HTTP and WebSocket (`ws://`) through Traefik. See the complete [project reference](docs/project-reference.md) for business workflows, service boundaries, feature/API inventory, migration policy, and known limitations.
 
 ## Architecture
 
@@ -38,38 +38,6 @@ Metrics ── Prometheus ── Grafana
 | discovery | `server discovery` / `nexuschat-discovery` | Interest profiles and ranking |
 | workspace | `server workspace` / `nexuschat-workspace` | Tasks, notes, bookmarks, Kanban, and reminders |
 | ai-service | `uvicorn app.main:app` / `nexuschat-ai-service` | AI workflows and semantic enrichment |
-
-## Main APIs
-
-Safety:
-
-- `POST/GET /api/safety/reports`
-- `PUT /api/safety/reports/{id}/status`
-- `POST /api/safety/reports/{id}/appeals`
-- `GET/POST /api/safety/blocks`, `DELETE /api/safety/blocks/{userId}`
-- `GET/POST/PUT/DELETE /api/safety/rules`
-- `GET /api/safety/decisions`
-
-Discovery:
-
-- `GET/PUT/DELETE /api/discovery/profile`
-- `GET/PUT /api/discovery/interests`
-- `GET /api/discovery/recommendations`
-- `GET /api/discovery/match-history`
-- `POST/PUT/DELETE /api/discovery/feedback`
-
-Workspace:
-
-- `GET/POST /api/workspace/items`
-- `GET/PUT/DELETE /api/workspace/items/{id}`
-- `PUT /api/workspace/items/{id}/status`
-- `PUT /api/workspace/items/{id}/assignees`
-- `POST/PUT/DELETE /api/workspace/items/{id}/checklist...`
-- `GET /api/workspace/boards/{channelId}`
-- `GET /api/workspace/bookmarks`
-- `POST/PUT/DELETE /api/workspace/collections`
-- `GET /api/workspace/reminders/due`
-- `GET /api/workspace/ws`
 
 ## Local Docker Compose
 
@@ -306,16 +274,5 @@ cd ..
 docker compose config
 ```
 
-## Security warning
-
-HTTP-only and public NodePorts are suitable only for a lab/private network. Production requires TLS, dashboard authentication, firewall/VPN/allowlisting, a secret manager, Kyverno Enforce, image signature verification, and immutable digest deployments. Do not commit a real password, OAuth secret, JWT secret, or API key.
-
-## API docs
-
-Swagger-generated docs are located at `docs/user`, `docs/match`, `docs/chat`, and `docs/uploader`. Regenerate them with:
-
-```bash
-make doc
-```
-
 See also [docs/README.md](docs/README.md) and [docs/deploy-k8s-guide.md](docs/deploy-k8s-guide.md).
+

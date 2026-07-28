@@ -1,6 +1,6 @@
 # NexusChat Kubernetes/K3s Lab Deployment Guide
 
-This document describes the current NexusChat Kubernetes lab deployment on K3s with approximately 4GB RAM/50GB disk. The current model uses Traefik, direct Helm deployment, Prometheus/Grafana, Jaeger/OpenTelemetry Collector, and Kyverno. ArgoCD, Consul, ECK/ELK, and ingress-nginx are not used.
+This document describes the current NexusChat Kubernetes lab deployment on K3s. The current model uses Traefik, direct Helm deployment, Prometheus/Grafana, Jaeger/OpenTelemetry Collector, and Kyverno.
 
 ## 1. Distinguish the Helm files
 
@@ -362,7 +362,6 @@ Workflow `.github/workflows/devsecops-platform.yml` is the direct CD source of t
 - Pull Request: tests, lint, builds, Helm rendering, and security scans.
 - Push to `main`, `kafka`, or a `v*` tag: build images, blocking Trivy scans, SBOM generation, and Cosign signing.
 - Push to `main`: apply Jaeger/OTel and Kafka UI/RedisInsight manifests, then deploy the app with Helm into `nexuschat-lab`.
-- ArgoCD is not used.
 
 The workflow triggers on `workflow_dispatch`, `pull_request` to any branch, pushes to `main` or `kafka`, and `v*` tags. The Kubernetes deploy job runs after the required image jobs succeed for either a push to `main` or a manual `workflow_dispatch`; it requires `build-images` and `build-proxy-variants` to pass, plus a self-hosted runner with labels `[self-hosted, linux, x64, k3s-lab]`.
 
@@ -443,3 +442,4 @@ kubectl -n kafka logs statefulset/kafka --tail=100
 ```
 
 `KAFKA_ADVERTISED_LISTENERS` must advertise a hostname that Kafka UI and applications in the cluster can resolve.
+

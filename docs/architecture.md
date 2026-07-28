@@ -80,3 +80,4 @@ Jaeger       : <NODE_IP>:30686
 ## Security note
 
 HTTP-only and public NodePorts are not suitable for production: tokens, cookies, chat content, and dashboards could be accessed without authorization. Production requires TLS, dashboard authentication, VPN/allowlisting, Kyverno Enforce, image signature verification, and a secret manager.
+

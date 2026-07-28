@@ -34,7 +34,7 @@ Proxy variants:
 
 ## CD
 
-CD is currently direct Helm, not ArgoCD:
+CD is currently direct Helm:
 
 - Deploys to the lab after the required image jobs succeed for a push to the `main` branch or a manual `workflow_dispatch`.
 - The Kubernetes deploy job requires the `main` push/manual-dispatch condition, `build-images`, and `build-proxy-variants` to pass.
@@ -74,3 +74,4 @@ The app Helm chart enables a non-root security context, drops capabilities, uses
 - NodePorts are not suitable for public production.
 - The workflow has no production promotion/approval yet.
 - Helm lint/template requires a machine with Helm; cluster rollout requires a working kubeconfig.
+

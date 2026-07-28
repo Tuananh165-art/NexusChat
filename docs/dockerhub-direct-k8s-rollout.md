@@ -111,7 +111,6 @@ The application Helm chart runs a pre-install/pre-upgrade Cassandra Job. It embe
 - Pull Request: tests, lint, builds, Helm rendering, and security scans.
 - Push to `main`, `kafka`, or a `v*` tag: build, scan, generate an SBOM, and sign.
 - Push to `main`: deploy Jaeger/OTel and dashboard manifests, then directly deploy the app to the lab with Helm.
-- ArgoCD is not used.
 
 The workflow triggers on `workflow_dispatch`, `pull_request` to any branch, pushes to `main` or `kafka`, and `v*` tags. The Kubernetes deploy job runs after the required image jobs succeed for either a push to `main` or a manual `workflow_dispatch`; it requires `build-images` and `build-proxy-variants` to pass, plus a self-hosted runner with labels `[self-hosted, linux, x64, k3s-lab]`.
 
@@ -133,3 +132,4 @@ done
 helm history nexuschat -n nexuschat-lab
 helm rollback nexuschat <REVISION> -n nexuschat-lab
 ```
+
