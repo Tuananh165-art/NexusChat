@@ -718,6 +718,17 @@ jobs:
         env:
           TAG: ${{ steps.vars.outputs.tag }}
         run: |
+          set -euo pipefail
+
+          release_status="$(helm -n "$KUBE_NAMESPACE" status nexuschat -o json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["info"]["status"])' 2>/dev/null || true)"
+          if [[ "$release_status" == pending-* ]]; then
+            pending_revision="$(helm -n "$KUBE_NAMESPACE" history nexuschat -o json | python3 -c 'import json,sys; print(max(item["revision"] for item in json.load(sys.stdin)))')"
+            echo "Helm release nexuschat is ${release_status} at revision ${pending_revision}; deleting stale release lock before upgrade"
+            kubectl --request-timeout=60s -n "$KUBE_NAMESPACE" delete secret "sh.helm.release.v1.nexuschat.v${pending_revision}"
+          fi
+
+          kubectl --request-timeout=60s -n "$KUBE_NAMESPACE" delete job nexuschat-cassandra-migration --ignore-not-found
+
           # Wait explicitly for application rollouts so failures are reported with clear diagnostics.
           helm upgrade --install nexuschat deployments/helm/nexuschat \
             --namespace "$KUBE_NAMESPACE" \
