@@ -196,6 +196,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-fs.sarif
+          category: trivy-fs
 
   build-images:
     name: Build, Scan, Sign Images
@@ -329,6 +330,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-${{ matrix.name }}.sarif
+          category: trivy-image-${{ matrix.name }}
 
       - name: Generate SBOM
         uses: anchore/sbom-action@v0
@@ -460,6 +462,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-proxy-api.sarif
+          category: trivy-proxy-api
 
       - name: Gate web proxy-upload image vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
@@ -486,6 +489,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-proxy-web.sarif
+          category: trivy-proxy-web
 
       - name: Gate web proxy-upload-v2 image vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
@@ -512,6 +516,7 @@ jobs:
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-proxy-web-v2.sarif
+          category: trivy-proxy-web-v2
 
       - name: Generate proxy image SBOMs
         uses: anchore/sbom-action@v0
