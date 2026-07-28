@@ -626,10 +626,36 @@ jobs:
           kubectl create namespace "$KUBE_NAMESPACE" --dry-run=client -o yaml | kubectl --request-timeout=60s apply -f -
 
       - name: Deploy Jaeger and OpenTelemetry Collector
-        run: kubectl apply -f deployments/platform/observability
+        run: |
+          set -euo pipefail
+          for attempt in {1..6}; do
+            if kubectl --request-timeout=60s apply -f deployments/platform/observability; then
+              exit 0
+            fi
+            if [[ "$attempt" == "6" ]]; then
+              echo "Failed to apply observability manifests after ${attempt} attempts" >&2
+              exit 1
+            fi
+            echo "Kubernetes API/apply failed while deploying observability; checking readiness before retry ${attempt}/6"
+            kubectl --request-timeout=30s get --raw=/readyz || true
+            sleep 15
+          done
 
       - name: Deploy dashboard applications
-        run: kubectl apply -f deployments/platform/dashboards
+        run: |
+          set -euo pipefail
+          for attempt in {1..6}; do
+            if kubectl --request-timeout=60s apply -f deployments/platform/dashboards; then
+              exit 0
+            fi
+            if [[ "$attempt" == "6" ]]; then
+              echo "Failed to apply dashboard manifests after ${attempt} attempts" >&2
+              exit 1
+            fi
+            echo "Kubernetes API/apply failed while deploying dashboards; checking readiness before retry ${attempt}/6"
+            kubectl --request-timeout=30s get --raw=/readyz || true
+            sleep 15
+          done
 
       - name: Sync environment files to Kubernetes Secrets
         env:

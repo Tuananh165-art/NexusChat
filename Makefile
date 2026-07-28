@@ -15,7 +15,7 @@ VERSION=v0.0.0
 all: build test
 test:
 	$(GOTEST) -gcflags=-l -v -cover -coverpkg=./... -coverprofile=cover.out ./...
-build: dep doc
+build: doc
 	$(GOBUILD) -ldflags="-X github.com/Tuananh165-art/NexusChat/cmd.Version=$(VERSION) -w -s" -o server ./main.go
 
 dep: wire
