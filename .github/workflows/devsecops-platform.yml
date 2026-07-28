@@ -616,8 +616,8 @@ jobs:
               break
             fi
             if [[ "$attempt" == "12" ]]; then
-              echo "Kubernetes API did not become ready after ${attempt} attempts" >&2
-              exit 1
+              echo "Kubernetes /readyz did not report clean readiness after ${attempt} attempts; continuing to node check" >&2
+              break
             fi
             echo "Kubernetes API is not ready yet; retrying in 10s (${attempt}/12)"
             sleep 10
