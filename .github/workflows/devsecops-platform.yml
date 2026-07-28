@@ -665,13 +665,34 @@ jobs:
           root_env_file="$GITHUB_WORKSPACE/.env"
           ai_env_file="$GITHUB_WORKSPACE/ai-service/.env"
 
-          [[ -s "$root_env_file" ]] || { echo "Missing or empty $root_env_file" >&2; exit 1; }
-          [[ -s "$ai_env_file" ]] || { echo "Missing or empty $ai_env_file" >&2; exit 1; }
+          validate_env_file() {
+            local env_file="$1"
+            [[ -s "$env_file" ]] || return 0
+            if grep -nE '^[[:space:]]*export[[:space:]]+[A-Za-z_][A-Za-z0-9_]*=' "$env_file"; then
+              echo "The .env files must use KEY=VALUE entries, not shell export statements" >&2
+              exit 1
+            fi
+          }
 
-          if grep -nE '^[[:space:]]*export[[:space:]]+[A-Za-z_][A-Za-z0-9_]*=' "$root_env_file" "$ai_env_file"; then
-            echo "The .env files must use KEY=VALUE entries, not shell export statements" >&2
+          sync_secret_from_env_or_keep_existing() {
+            local secret_name="$1"
+            local env_file="$2"
+            if [[ -s "$env_file" ]]; then
+              kubectl -n "$KUBE_NAMESPACE" create secret generic "$secret_name" \
+                --from-env-file="$env_file" \
+                --dry-run=client -o yaml | kubectl --request-timeout=60s apply -f -
+              return 0
+            fi
+            if kubectl --request-timeout=60s -n "$KUBE_NAMESPACE" get secret "$secret_name" >/dev/null 2>&1; then
+              echo "$env_file is missing or empty; preserving existing Kubernetes Secret/$secret_name"
+              return 0
+            fi
+            echo "Missing or empty $env_file and Kubernetes Secret/$secret_name does not exist" >&2
             exit 1
-          fi
+          }
+
+          validate_env_file "$root_env_file"
+          validate_env_file "$ai_env_file"
 
           # Preserve the existing TURN value across deploys. Fall back to the GitHub
           # secret or generate one only when the Kubernetes Secret has no value yet.
@@ -684,18 +705,14 @@ jobs:
             turn_shared_secret="$(openssl rand -hex 32)"
           fi
 
-          kubectl -n "$KUBE_NAMESPACE" create secret generic nexuschat-runtime \
-            --from-env-file="$root_env_file" \
-            --dry-run=client -o yaml | kubectl apply -f -
+          sync_secret_from_env_or_keep_existing nexuschat-runtime "$root_env_file"
 
           encoded_turn="$(printf '%s' "$turn_shared_secret" | base64 | tr -d '\n')"
-          kubectl -n "$KUBE_NAMESPACE" patch secret nexuschat-runtime \
+          kubectl --request-timeout=60s -n "$KUBE_NAMESPACE" patch secret nexuschat-runtime \
             --type merge \
             -p "{\"data\":{\"CALL_TURN_SHAREDSECRET\":\"${encoded_turn}\"}}"
 
-          kubectl -n "$KUBE_NAMESPACE" create secret generic nexuschat-ai-service \
-            --from-env-file="$ai_env_file" \
-            --dry-run=client -o yaml | kubectl apply -f -
+          sync_secret_from_env_or_keep_existing nexuschat-ai-service "$ai_env_file"
 
       - name: Helm upgrade lab release
         env:
