@@ -729,10 +729,18 @@ jobs:
 
           kubectl --request-timeout=60s -n "$KUBE_NAMESPACE" delete job nexuschat-cassandra-migration --ignore-not-found
 
+          helm_hook_args=()
+          cassandra_endpoints="$(kubectl --request-timeout=60s -n cassandra get endpoints cassandra -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)"
+          if [[ -z "$cassandra_endpoints" ]]; then
+            echo "Cassandra has no ready endpoints; skipping Helm hooks so the lab release metadata can still be updated."
+            helm_hook_args+=(--no-hooks)
+          fi
+
           # Wait explicitly for application rollouts so failures are reported with clear diagnostics.
           helm upgrade --install nexuschat deployments/helm/nexuschat \
             --namespace "$KUBE_NAMESPACE" \
             --create-namespace \
+            "${helm_hook_args[@]}" \
             --values deployments/helm/nexuschat/values.yaml \
             --values deployments/helm/nexuschat/values-lab-k3s.yaml \
             --set-string imageDefaults.tag="${TAG}" \
