@@ -58,16 +58,16 @@ metadata:
   name: redisinsight
   namespace: redis-ui
   labels:
-    app.kubernetes.io/name: redisinsight
+    app: redisinsight
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: redisinsight
+      app: redisinsight
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: redisinsight
+        app: redisinsight
     spec:
       containers:
         - name: redisinsight
@@ -84,7 +84,7 @@ metadata:
 spec:
   type: NodePort
   selector:
-    app.kubernetes.io/name: redisinsight
+    app: redisinsight
   ports:
     - name: http
       port: 5540
